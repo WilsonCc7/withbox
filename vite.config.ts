@@ -8,7 +8,9 @@ export default defineConfig({
   plugins: [
     vinext({
       cache: { data: kvDataAdapter(), cdn: staticAssetsAdapter() },
-      prerender: { routes: "*" },
+      // Prerendering is off: every page renders a session-aware header, so no
+      // route is truly static, and the prerender pass runs without the Worker's
+      // secret bindings. Turn it back on only for genuinely public routes.
     }),
     cloudflare({
       viteEnvironment: {

@@ -1,6 +1,9 @@
+import { MediaLibraryPanel } from "@/components/media-library-panel";
 import { SiteHeader } from "@/components/site-header";
+import { getWatchState, isInWatchlist } from "@/lib/library/queries";
 import { imageUrl } from "@/lib/media/images";
 import { mediaSource } from "@/lib/media/runtime";
+import { currentUser } from "@/lib/session";
 
 function formatRuntime(minutes: number | null): string | null {
   if (!minutes || minutes <= 0) return null;
@@ -44,6 +47,12 @@ export default async function MoviePage({ params }: { params: Promise<{ id: stri
   const facts = [movie.year, runtime, movie.genres.map((g) => g.name).join(", ")]
     .filter(Boolean)
     .join(" · ");
+
+  const user = await currentUser();
+  const ref = { kind: "movie" as const, tmdbId };
+  const [watchState, inWatchlist] = user
+    ? await Promise.all([getWatchState(user.id, ref), isInWatchlist(user.id, ref)])
+    : [null, false];
 
   return (
     <>
@@ -101,6 +110,22 @@ export default async function MoviePage({ params }: { params: Promise<{ id: stri
             )}
           </div>
         </div>
+
+        {user && watchState ? (
+          <MediaLibraryPanel
+            inWatchlist={inWatchlist}
+            kind="movie"
+            state={watchState}
+            tmdbId={tmdbId}
+          />
+        ) : (
+          <p className="mt-8 rounded-lg border border-border bg-surface p-4 text-sm text-muted">
+            <a className="text-accent hover:text-accent-hi" href="/sign-in">
+              Sign in
+            </a>{" "}
+            to track this film.
+          </p>
+        )}
       </main>
     </>
   );

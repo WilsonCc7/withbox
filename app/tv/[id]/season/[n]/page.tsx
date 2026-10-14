@@ -1,6 +1,11 @@
+import { EpisodeMarker } from "@/components/library/episode-marker";
+import { MarkSeasonForm } from "@/components/library/mark-season-form";
 import { SiteHeader } from "@/components/site-header";
+import { markSeason, toggleWatched } from "@/lib/library/actions";
+import { getEpisodeMarks } from "@/lib/library/queries";
 import { imageUrl } from "@/lib/media/images";
 import { mediaSource } from "@/lib/media/runtime";
+import { currentUser } from "@/lib/session";
 
 export default async function SeasonPage({
   params,
@@ -30,6 +35,12 @@ export default async function SeasonPage({
 
   const season = show.seasons.find((s) => s.seasonNumber === seasonNumber);
 
+  const user = await currentUser();
+  const marks = user ? await getEpisodeMarks(user.id, tmdbId) : [];
+  const watchedEpisodes = new Set(
+    marks.filter((m) => m.season === seasonNumber).map((m) => m.episode),
+  );
+
   return (
     <>
       <SiteHeader />
@@ -39,9 +50,23 @@ export default async function SeasonPage({
             {show.title}
           </a>
         </p>
-        <h1 className="mt-1 mb-6 text-2xl font-semibold">
+        <h1 className="mt-1 mb-2 text-2xl font-semibold">
           {season?.name ?? `Season ${seasonNumber}`}
         </h1>
+
+        {user && episodes.length > 0 && (
+          <p className="mb-4 text-sm text-muted">
+            {watchedEpisodes.size} of {episodes.length} watched
+            <span className="ml-3 inline-block">
+              <MarkSeasonForm
+                action={markSeason}
+                episodes={episodes.map((e) => e.episodeNumber)}
+                season={seasonNumber}
+                tmdbId={tmdbId}
+              />
+            </span>
+          </p>
+        )}
 
         {episodes.length === 0 ? (
           <p className="text-muted">No episodes listed for this season.</p>
@@ -65,15 +90,12 @@ export default async function SeasonPage({
                       <div className="aspect-video w-full rounded border border-border bg-surface-hi" />
                     )}
                   </div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium">
                       <span className="text-faint">{episode.episodeNumber}.</span> {episode.name}
                     </p>
                     <p className="mt-1 text-xs text-faint">
-                      {[
-                        episode.airDate,
-                        episode.runtime ? `${episode.runtime}m` : null,
-                      ]
+                      {[episode.airDate, episode.runtime ? `${episode.runtime}m` : null]
                         .filter(Boolean)
                         .join(" · ")}
                     </p>
@@ -81,6 +103,19 @@ export default async function SeasonPage({
                       <p className="mt-2 line-clamp-3 text-sm leading-6 text-muted">
                         {episode.overview}
                       </p>
+                    )}
+                    {user && (
+                      <div className="mt-2">
+                        <EpisodeMarker
+                          action={toggleWatched}
+                          episode={episode.episodeNumber}
+                          kind="tv"
+                          name={episode.name}
+                          season={seasonNumber}
+                          tmdbId={tmdbId}
+                          watched={watchedEpisodes.has(episode.episodeNumber)}
+                        />
+                      </div>
                     )}
                   </div>
                 </li>

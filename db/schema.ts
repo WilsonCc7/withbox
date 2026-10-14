@@ -1,4 +1,4 @@
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /**
  * Better Auth tables for SQLite/D1.
@@ -98,9 +98,122 @@ export const verification = sqliteTable(
   (table) => [index("verification_identifier_index").on(table.identifier)],
 );
 
+/**
+ * Domain tables.
+ *
+ * Same camelCase convention as the Better Auth tables above, so the database
+ * has one naming style.
+ *
+ * Modelling notes:
+ *
+ * - A film is `(kind: "movie", tmdbId, season: null, episode: null)`.
+ * - A series episode is `(kind: "tv", tmdbId, season, episode)`.
+ * - There is deliberately **no** series-level or season-level row. Marking a
+ *   whole show or season is a batch insert of episode rows, and show/season
+ *   progress is derived with COUNT at query time. A stored counter is a bug
+ *   waiting for a delete.
+ * - `watch_entry` allows repeated rows for the same key, so rewatches are
+ *   representable. "Have I watched this" is an EXISTS check; toggling off
+ *   deletes every row for that key.
+ */
+
+export const watchEntry = sqliteTable(
+  "watch_entry",
+  {
+    id: text("id").primaryKey(),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["movie", "tv"] }).notNull(),
+    tmdbId: integer("tmdbId").notNull(),
+    season: integer("season"),
+    episode: integer("episode"),
+    watchedAt: integer("watchedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("watch_entry_user_media").on(table.userId, table.kind, table.tmdbId),
+    index("watch_entry_user_episode").on(
+      table.userId,
+      table.kind,
+      table.tmdbId,
+      table.season,
+      table.episode,
+    ),
+    index("watch_entry_user_watched_at").on(table.userId, table.watchedAt),
+  ],
+);
+
+export const rating = sqliteTable(
+  "rating",
+  {
+    id: text("id").primaryKey(),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["movie", "tv"] }).notNull(),
+    tmdbId: integer("tmdbId").notNull(),
+    /**
+     * Half-stars, 1..10 — 7 is three and a half stars. Integers avoid float
+     * rounding when averaging, and sort correctly.
+     */
+    value: integer("value").notNull(),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" })
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    uniqueIndex("rating_user_media").on(table.userId, table.kind, table.tmdbId),
+  ],
+);
+
+export const review = sqliteTable(
+  "review",
+  {
+    id: text("id").primaryKey(),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["movie", "tv"] }).notNull(),
+    tmdbId: integer("tmdbId").notNull(),
+    body: text("body").notNull(),
+    containsSpoilers: integer("containsSpoilers", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" })
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    uniqueIndex("review_user_media").on(table.userId, table.kind, table.tmdbId),
+  ],
+);
+
+export const watchlistItem = sqliteTable(
+  "watchlist_item",
+  {
+    id: text("id").primaryKey(),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["movie", "tv"] }).notNull(),
+    tmdbId: integer("tmdbId").notNull(),
+    addedAt: integer("addedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("watchlist_user_media").on(table.userId, table.kind, table.tmdbId),
+    index("watchlist_user_added").on(table.userId, table.addedAt),
+  ],
+);
+
 export const schema = {
   user,
   session,
   account,
   verification,
+  watchEntry,
+  rating,
+  review,
+  watchlistItem,
 };

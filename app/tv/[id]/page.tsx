@@ -1,6 +1,9 @@
+import { MediaLibraryPanel } from "@/components/media-library-panel";
 import { SiteHeader } from "@/components/site-header";
+import { getWatchState, isInWatchlist } from "@/lib/library/queries";
 import { imageUrl } from "@/lib/media/images";
 import { mediaSource } from "@/lib/media/runtime";
+import { currentUser } from "@/lib/session";
 
 export default async function TvPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -42,6 +45,12 @@ export default async function TvPage({ params }: { params: Promise<{ id: string 
   ]
     .filter(Boolean)
     .join(" · ");
+
+  const user = await currentUser();
+  const ref = { kind: "tv" as const, tmdbId };
+  const [watchState, inWatchlist] = user
+    ? await Promise.all([getWatchState(user.id, ref), isInWatchlist(user.id, ref)])
+    : [null, false];
 
   return (
     <>
@@ -95,6 +104,22 @@ export default async function TvPage({ params }: { params: Promise<{ id: string 
             {show.overview && <p className="mt-4 max-w-2xl leading-7 text-muted">{show.overview}</p>}
           </div>
         </div>
+
+        {user && watchState ? (
+          <MediaLibraryPanel
+            inWatchlist={inWatchlist}
+            kind="tv"
+            state={watchState}
+            tmdbId={tmdbId}
+          />
+        ) : (
+          <p className="mt-8 rounded-lg border border-border bg-surface p-4 text-sm text-muted">
+            <a className="text-accent hover:text-accent-hi" href="/sign-in">
+              Sign in
+            </a>{" "}
+            to track this series.
+          </p>
+        )}
 
         <h2 className="mt-10 mb-4 text-lg font-semibold">Seasons</h2>
         <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">

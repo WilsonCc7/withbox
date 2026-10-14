@@ -8,6 +8,20 @@
       "when": 1791988372773,
       "tag": "0000_next_greymalkin",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1791988877058,
+      "tag": "0001_real_medusa",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791988892093,
+      "tag": "0002_lame_clint_barton",
+      "breakpoints": true
     }
   ]
 }

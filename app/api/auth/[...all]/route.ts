@@ -1,4 +1,4 @@
-import { auth } from "../../../../lib/auth";
+import { getAuth } from "../../../../lib/auth";
 
 /**
  * Mounts the Better Auth handler at `/api/auth/*`.
@@ -11,9 +11,9 @@ import { auth } from "../../../../lib/auth";
  * request URL itself.
  */
 export async function GET(request: Request): Promise<Response> {
-  return auth.handler(request);
+  return getAuth().handler(request);
 }
 
 export async function POST(request: Request): Promise<Response> {
-  return auth.handler(request);
+  return getAuth().handler(request);
 }
