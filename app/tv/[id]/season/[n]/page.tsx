@@ -117,6 +117,14 @@ export default async function SeasonPage({
                         />
                       </div>
                     )}
+                    <p className="mt-2">
+                      <a
+                        className="inline-block rounded border border-border px-3 py-1 text-xs text-accent hover:border-faint"
+                        href={`/watch/tv/${tmdbId}?season=${seasonNumber}&episode=${episode.episodeNumber}`}
+                      >
+                        ▶ Play
+                      </a>
+                    </p>
                   </div>
                 </li>
               );

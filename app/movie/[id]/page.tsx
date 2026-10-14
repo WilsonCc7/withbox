@@ -94,6 +94,15 @@ export default async function MoviePage({ params }: { params: Promise<{ id: stri
 
             {facts && <p className="mt-2 text-sm text-muted">{facts}</p>}
 
+            <p className="mt-3">
+              <a
+                className="inline-block rounded bg-accent px-4 py-2 text-sm font-medium text-bg"
+                href={`/watch/movie/${tmdbId}`}
+              >
+                ▶ Play
+              </a>
+            </p>
+
             {movie.voteAverage !== null && (
               <p className="mt-2 text-sm text-muted">
                 <span className="text-accent">★ {movie.voteAverage.toFixed(1)}</span>
