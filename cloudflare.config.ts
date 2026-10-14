@@ -15,6 +15,13 @@ export default defineConfig({
       // The mode is baked at build time so the benchmark can force fixtures.
       TMDB_MODE: bindings.text(process.env.WITHBOX_TMDB_MODE ?? "auto"),
       TMDB_API_KEY: bindings.secret(),
+      // No `id`: deployment needs the real D1 database UUID from `cf d1 create`.
+      DB: bindings.d1({ name: "withbox" }),
+      BETTER_AUTH_SECRET: bindings.secret(),
+      // Must be set for a real deployment; localhost is the dev default only.
+      BETTER_AUTH_URL: bindings.text(
+        process.env.WITHBOX_BASE_URL ?? "http://localhost:8787",
+      ),
     },
   }),
 });
