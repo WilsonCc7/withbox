@@ -8,6 +8,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PORT="${PORT:-8787}"
+# Bake fixture mode into the build so this check is deterministic and never
+# touches the network, regardless of the caller's environment or .dev.vars.
+export WITHBOX_TMDB_MODE=fixture
 # Must match BETTER_AUTH_URL baked into the Worker, or Better Auth rejects the
 # request with INVALID_ORIGIN and Next rejects action POSTs with 403.
 BASE="http://localhost:${PORT}"
@@ -123,19 +126,41 @@ STATUS=$(post_action "$BASE/tv/94605/season/1" "$EP_ACTION" kind=tv tmdbId=94605
 curl -s -m 15 "$BASE/tv/94605/season/1" -b "$JAR" -o /tmp/season-after.html
 # React renders "{n} of {m} watched" as separate text nodes, so count the
 # episode marker labels instead — an exact, split-proof assertion.
-COUNT=$(body /tmp/season-after.html | grep -o "✓ Watched" | wc -l)
+# `|| true`: grep exits 1 on zero matches, and `set -o pipefail` would otherwise
+# kill the script before the assertion can say what went wrong.
+COUNT=$(body /tmp/season-after.html | grep -o "✓ Watched" | wc -l || true)
 [[ "$COUNT" == "1" ]] || fail "expected 1 marked episode, found $COUNT"
 echo "ok  episode marked watched (1 of 9)"
 
+# Regression: marking a *second* episode must add to the first, not replace it.
+# toggleWatched once keyed only on (userId, kind, tmdbId), so the EXISTS check
+# found episode 1 and deleted every mark for the show.
+SEASON_URL="$BASE/tv/94605/season/1"
+curl -s -m 15 "$SEASON_URL" -b "$JAR" -o /tmp/season.html
+EP_ACTION=$(action_for /tmp/season.html toggleWatched)
+STATUS=$(post_action "$SEASON_URL" "$EP_ACTION" kind=tv tmdbId=94605 season=1 episode=2)
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "second episode toggle returned $STATUS"
+curl -s -m 15 "$SEASON_URL" -b "$JAR" -o /tmp/season-two.html
+COUNT=$(body /tmp/season-two.html | grep -o "✓ Watched" | wc -l || true)
+[[ "$COUNT" == "2" ]] || fail "expected 2 marked episodes after marking a second, found $COUNT"
+echo "ok  second episode adds rather than replacing"
+
+# Toggling one episode off must not disturb the other.
+STATUS=$(post_action "$SEASON_URL" "$EP_ACTION" kind=tv tmdbId=94605 season=1 episode=1)
+curl -s -m 15 "$SEASON_URL" -b "$JAR" -o /tmp/season-one.html
+COUNT=$(body /tmp/season-one.html | grep -o "✓ Watched" | wc -l || true)
+[[ "$COUNT" == "1" ]] || fail "expected 1 marked episode after toggling one off, found $COUNT"
+echo "ok  toggling one episode off leaves the other marked"
+
 # --- whole-season shortcut ----------------------------------------------
-ACTION=$(action_for /tmp/season-after.html markSeason)
+ACTION=$(action_for /tmp/season-one.html markSeason)
 [[ -n "$ACTION" ]] || fail "no markSeason action on the season page"
 STATUS=$(post_action "$BASE/tv/94605/season/1" "$ACTION" tmdbId=94605 season=1 \
   episodes=1,2,3,4,5,6,7,8,9)
 [[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "markSeason returned $STATUS"
 
 curl -s -m 15 "$BASE/tv/94605/season/1" -b "$JAR" -o /tmp/season-full.html
-COUNT=$(body /tmp/season-full.html | grep -o "✓ Watched" | wc -l)
+COUNT=$(body /tmp/season-full.html | grep -o "✓ Watched" | wc -l || true)
 [[ "$COUNT" == "9" ]] || fail "expected 9 marked episodes, found $COUNT"
 echo "ok  whole-season shortcut marked all 9 episodes"
 

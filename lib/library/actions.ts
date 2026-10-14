@@ -1,6 +1,6 @@
 "use server";
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
@@ -94,29 +94,31 @@ export async function toggleWatched(formData: FormData): Promise<void> {
       : parseNonNegativeInt(rawEpisode, "episode");
 
   const db = getDb();
+
+  // The key is the full identity of what was watched: a film is
+  // (kind, tmdbId, null, null), an episode is (kind, tmdbId, season, episode).
+  // Matching on only (userId, kind, tmdbId) would make marking S01E02 delete
+  // every mark for the whole show, because the EXISTS check would find S01E01.
+  //
+  // NULL needs `isNull`, not `eq(col, null)` — the latter compiles to `= NULL`,
+  // which matches nothing in SQLite.
+  const key = [
+    eq(watchEntry.userId, user.id),
+    eq(watchEntry.kind, kind),
+    eq(watchEntry.tmdbId, tmdbId),
+    season === null ? isNull(watchEntry.season) : eq(watchEntry.season, season),
+    episode === null ? isNull(watchEntry.episode) : eq(watchEntry.episode, episode),
+  ];
+
   const existing = await db
     .select({ id: watchEntry.id })
     .from(watchEntry)
-    .where(
-      and(
-        eq(watchEntry.userId, user.id),
-        eq(watchEntry.kind, kind),
-        eq(watchEntry.tmdbId, tmdbId),
-      ),
-    )
+    .where(and(...key))
     .limit(1);
 
   if (existing.length > 0) {
-    // Toggle off: delete every row for the key (rewatches included).
-    await db
-      .delete(watchEntry)
-      .where(
-        and(
-          eq(watchEntry.userId, user.id),
-          eq(watchEntry.kind, kind),
-          eq(watchEntry.tmdbId, tmdbId),
-        ),
-      );
+    // Toggle off: delete every row for this key (rewatches included).
+    await db.delete(watchEntry).where(and(...key));
   } else {
     await db.insert(watchEntry).values({
       id: crypto.randomUUID(),
