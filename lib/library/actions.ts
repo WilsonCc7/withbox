@@ -39,6 +39,42 @@ function parseNonNegativeInt(
   return value;
 }
 
+/** Absent/empty means "not applicable" (a film has no season), not an error. */
+function parseOptionalNonNegativeInt(
+  raw: FormDataEntryValue | null,
+  field: string,
+): number | null {
+  if (raw === null || raw === "") return null;
+  return parseNonNegativeInt(raw, field);
+}
+
+/**
+ * The full identity of one watchable thing: a film is
+ * (kind, tmdbId, null, null), an episode is (kind, tmdbId, season, episode).
+ *
+ * Every action that reads or writes a watch row goes through this. Matching on
+ * only (userId, kind, tmdbId) once made marking S01E02 delete the whole series,
+ * so the predicates are deliberately built in one place.
+ *
+ * NULL needs `isNull`, not `eq(col, null)` — the latter compiles to `= NULL`,
+ * which matches nothing in SQLite.
+ */
+function watchKey(
+  userId: string,
+  kind: MediaKind,
+  tmdbId: number,
+  season: number | null,
+  episode: number | null,
+) {
+  return [
+    eq(watchEntry.userId, userId),
+    eq(watchEntry.kind, kind),
+    eq(watchEntry.tmdbId, tmdbId),
+    season === null ? isNull(watchEntry.season) : eq(watchEntry.season, season),
+    episode === null ? isNull(watchEntry.episode) : eq(watchEntry.episode, episode),
+  ];
+}
+
 function parseEpisodeList(raw: FormDataEntryValue | null): number[] {
   const value = String(raw ?? "");
   if (value.trim() === "") return [];
@@ -82,33 +118,11 @@ export async function toggleWatched(formData: FormData): Promise<void> {
   const user = await requireUser();
   const kind = parseKind(formData.get("kind"));
   const tmdbId = parseTmdbId(formData.get("tmdbId"));
-  const rawSeason = formData.get("season");
-  const rawEpisode = formData.get("episode");
-  const season =
-    rawSeason === null || rawSeason === ""
-      ? null
-      : parseNonNegativeInt(rawSeason, "season");
-  const episode =
-    rawEpisode === null || rawEpisode === ""
-      ? null
-      : parseNonNegativeInt(rawEpisode, "episode");
+  const season = parseOptionalNonNegativeInt(formData.get("season"), "season");
+  const episode = parseOptionalNonNegativeInt(formData.get("episode"), "episode");
 
   const db = getDb();
-
-  // The key is the full identity of what was watched: a film is
-  // (kind, tmdbId, null, null), an episode is (kind, tmdbId, season, episode).
-  // Matching on only (userId, kind, tmdbId) would make marking S01E02 delete
-  // every mark for the whole show, because the EXISTS check would find S01E01.
-  //
-  // NULL needs `isNull`, not `eq(col, null)` — the latter compiles to `= NULL`,
-  // which matches nothing in SQLite.
-  const key = [
-    eq(watchEntry.userId, user.id),
-    eq(watchEntry.kind, kind),
-    eq(watchEntry.tmdbId, tmdbId),
-    season === null ? isNull(watchEntry.season) : eq(watchEntry.season, season),
-    episode === null ? isNull(watchEntry.episode) : eq(watchEntry.episode, episode),
-  ];
+  const key = watchKey(user.id, kind, tmdbId, season, episode);
 
   const existing = await db
     .select({ id: watchEntry.id })
@@ -130,6 +144,58 @@ export async function toggleWatched(formData: FormData): Promise<void> {
       watchedAt: new Date(),
     });
   }
+  await revalidatePaths(pathsForMedia(kind, tmdbId));
+}
+
+/**
+ * Idempotent "mark watched", for the player's completion signal.
+ *
+ * Deliberately not `toggleWatched`: a player reports completion more than once
+ * (seek past the end, replay, a duplicate postMessage), and a toggle would
+ * un-watch the title on the second call.
+ */
+export async function markWatched(formData: FormData): Promise<void> {
+  const user = await requireUser();
+  const kind = parseKind(formData.get("kind"));
+  const tmdbId = parseTmdbId(formData.get("tmdbId"));
+  const season = parseOptionalNonNegativeInt(formData.get("season"), "season");
+  const episode = parseOptionalNonNegativeInt(formData.get("episode"), "episode");
+
+  const db = getDb();
+  const key = watchKey(user.id, kind, tmdbId, season, episode);
+  const existing = await db
+    .select({ id: watchEntry.id })
+    .from(watchEntry)
+    .where(and(...key))
+    .limit(1);
+
+  if (existing.length === 0) {
+    await db.insert(watchEntry).values({
+      id: crypto.randomUUID(),
+      userId: user.id,
+      kind,
+      tmdbId,
+      season,
+      episode,
+      watchedAt: new Date(),
+    });
+  }
+
+  await revalidatePaths(pathsForMedia(kind, tmdbId));
+}
+
+/** Removal counterpart to `markWatched`; used when a mark was set by mistake. */
+export async function unmarkWatched(formData: FormData): Promise<void> {
+  const user = await requireUser();
+  const kind = parseKind(formData.get("kind"));
+  const tmdbId = parseTmdbId(formData.get("tmdbId"));
+  const season = parseOptionalNonNegativeInt(formData.get("season"), "season");
+  const episode = parseOptionalNonNegativeInt(formData.get("episode"), "episode");
+
+  await getDb()
+    .delete(watchEntry)
+    .where(and(...watchKey(user.id, kind, tmdbId, season, episode)));
+
   await revalidatePaths(pathsForMedia(kind, tmdbId));
 }
 

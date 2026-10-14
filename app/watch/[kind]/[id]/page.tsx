@@ -1,7 +1,10 @@
 import { PlayerFrame } from "@/components/player/player-frame";
+import { PlayerProgressBridge } from "@/components/player/player-progress-bridge";
 import { SiteHeader } from "@/components/site-header";
+import { markWatched } from "@/lib/library/actions";
 import { mediaSource } from "@/lib/media/runtime";
 import { resolveStream } from "@/lib/sources";
+import type { TvDetail } from "@/lib/media/types";
 
 /**
  * Playback. `/watch/movie/550`, `/watch/tv/1399?season=1&episode=1`.
@@ -57,6 +60,15 @@ export default async function WatchPage({
       ? `${media.title} — S${season}E${episode}`
       : media.title;
 
+  // Auto-advance within a season only. Crossing into the next season would need
+  // that season's episode list, which this page has no reason to load.
+  const nextHref = (() => {
+    if (!isTv || season === undefined || episode === undefined) return null;
+    const seasonInfo = (media as TvDetail).seasons.find((s) => s.seasonNumber === season);
+    if (!seasonInfo || episode >= seasonInfo.episodeCount) return null;
+    return `/watch/tv/${tmdbId}?season=${season}&episode=${episode + 1}`;
+  })();
+
   return (
     <>
       {header}
@@ -69,10 +81,26 @@ export default async function WatchPage({
         {resolved ? (
           <>
             <PlayerFrame resolution={resolved.resolution} title={heading} />
+
+            {resolved.resolution.kind === "iframe" && resolved.resolution.progress && (
+              <PlayerProgressBridge
+                allowedOrigin={new URL(resolved.resolution.url).origin}
+                episode={isTv ? (episode ?? null) : null}
+                kind={isTv ? "tv" : "movie"}
+                markAction={markWatched}
+                nextHref={nextHref}
+                season={isTv ? (season ?? null) : null}
+                tmdbId={tmdbId}
+              />
+            )}
+
             <p className="mt-3 text-xs text-faint">
               Source: {resolved.adapter.label}
               {resolved.resolution.kind === "iframe" && !resolved.resolution.progress && (
                 <> · this source cannot report playback position, so mark it watched yourself</>
+              )}
+              {resolved.resolution.kind === "iframe" && resolved.resolution.progress && (
+                <> · marks itself watched when you finish{nextHref ? ", then plays the next episode" : ""}</>
               )}
             </p>
           </>
