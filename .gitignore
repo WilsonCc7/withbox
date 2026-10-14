@@ -5,3 +5,10 @@ next-env.d.ts
 /dist/
 .vinext/
 .cloudflare/
+
+# Local secrets — never commit.
+.dev.vars*
+tmdbapikey.md
+
+# Build artifacts.
+*.tsbuildinfo
