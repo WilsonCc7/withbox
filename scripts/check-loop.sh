@@ -277,6 +277,64 @@ curl -s -m 15 "$BASE/tv/94605/season/1" -b "$JAR2" -o /tmp/mw2.html
 COUNT=$(body /tmp/mw2.html | grep -o "✓ Watched" | wc -l || true)
 [[ "$COUNT" == "1" ]] || fail "a second completion event changed the count to $COUNT"
 echo "ok  player completion action marks once and stays marked"
+
+# --- source picker -------------------------------------------------------
+# Every adapter that can serve a request is resolved so the viewer can escape
+# one that is broken or slow. Framextv cannot serve TV at all, so it must not
+# appear as an option there — offering a source that will fail is worse than
+# offering none.
+iframe_src() {
+  python3 -c "
+import re, sys
+h = open(sys.argv[1]).read()
+m = re.search(r'<iframe[^>]*src=\"([^\"]+)\"', h)
+print(m.group(1).replace('&amp;', '&') if m else '')
+" "$1"
+}
+
+WATCH="$BASE/watch/tv/94605?season=1&episode=1"
+curl -s -m 15 "$WATCH" -b "$JAR" -o /tmp/src-default.html
+DEF=$(iframe_src /tmp/src-default.html)
+[[ "$DEF" == *vidlink.pro* ]] || fail "default TV source is not vidlink (got $DEF)"
+grep -q "source=framextv" /tmp/src-default.html \
+  && fail "framextv is offered for a TV episode it cannot play"
+
+SWITCH=$(python3 -c "
+import re
+h = open('/tmp/src-default.html').read()
+m = re.search(r'href=\"(/watch/tv/94605\?[^\"]*source=vidsrc[^\"]*)\"', h)
+print(m.group(1).replace('&amp;', '&') if m else '')
+")
+[[ -n "$SWITCH" ]] || fail "no switch link to vidsrc"
+[[ "$SWITCH" == *season=1* && "$SWITCH" == *episode=1* ]] \
+  || fail "switch link lost the episode context: $SWITCH"
+
+curl -s -m 15 "$BASE$SWITCH" -b "$JAR" -o /tmp/src-vidsrc.html
+V=$(iframe_src /tmp/src-vidsrc.html)
+[[ "$V" == *vidsrc* ]] || fail "?source=vidsrc did not switch provider (got $V)"
+[[ "$V" != "$DEF" ]] || fail "?source=vidsrc rendered the same player as the default"
+echo "ok  source picker switches provider and keeps the episode"
+
+# A source that is unknown, or that cannot serve this request, must degrade to
+# the default rather than turning a playable title into an error.
+for q in "source=nonsense" "source=framextv" "source="; do
+  curl -s -m 15 "$WATCH&$q" -b "$JAR" -o /tmp/src-fallback.html
+  F=$(iframe_src /tmp/src-fallback.html)
+  [[ "$F" == "$DEF" ]] || fail "?$q did not fall back to the default source (got $F)"
+done
+echo "ok  unknown and unsupported sources fall back to the default"
+
+# Auto-advance must keep the chosen provider, or the next episode would
+# silently come from somebody else.
+python3 -c "
+h = open('/tmp/src-default.html').read()
+i = h.find('nextHref')
+print(h[i:i + 160] if i >= 0 else 'NONE')
+" > /tmp/nexthref.txt
+grep -q 'episode=2' /tmp/nexthref.txt || fail "auto-advance link lost the episode"
+grep -q 'source=vidlink' /tmp/nexthref.txt \
+  || fail "auto-advance does not carry the source forward"
+echo "ok  auto-advance carries the source forward"
 rm -f "$JAR2"
 
 # --- social: follows, feed, lists ----------------------------------------
