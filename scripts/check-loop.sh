@@ -414,6 +414,57 @@ curl -s -m 15 "$WATCH&source=vidsrc" -b "$JAR" -o /tmp/resume-tiny.html
 RT=$(iframe_src /tmp/resume-tiny.html)
 [[ "$RT" != *startAt* ]] || fail "a 5-second position was treated as resumable: $RT"
 echo "ok  resume is honoured only by adapters that support it, and only past the floor"
+
+# --- the upsert must not duplicate rows ----------------------------------
+# `slotKey` exists precisely because SQLite treats NULLs as DISTINCT in a
+# unique index: for a film (season and episode both NULL) an index on the raw
+# columns would never collide, so every save would insert another row and the
+# "resume" would read back whichever one won. This asserts the property the
+# design decision was made for, by reading the table directly.
+db_scalar() {
+  python3 - "$BASE" "$1" <<'PY'
+import json, sys, urllib.request
+base, sql = sys.argv[1], sys.argv[2]
+api = f"{base}/cdn-cgi/local/explorer/api"
+
+
+def call(path, payload=None, method="GET"):
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(
+        api + path,
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method=method,
+    )
+    with urllib.request.urlopen(req, timeout=45) as r:
+        return json.load(r)
+
+
+uuid = call("/d1/database")["result"][0]["uuid"]
+res = call(f"/d1/database/{uuid}/raw", {"batch": [{"sql": sql}]}, "POST")
+print(res["result"][0]["results"]["rows"][0][0])
+PY
+}
+
+EP_SLOT="kind='tv' AND tmdbId=94605 AND season=1 AND episode=1"
+seed_progress 900
+seed_progress 1200
+COUNT=$(db_scalar "SELECT COUNT(*) FROM playback_progress WHERE $EP_SLOT")
+[[ "$COUNT" == "1" ]] || fail "two saves for one episode slot produced $COUNT rows"
+POS=$(db_scalar "SELECT positionSeconds FROM playback_progress WHERE $EP_SLOT")
+[[ "$POS" == "1200" ]] || fail "stored position is $POS, expected the newest (1200)"
+echo "ok  repeated saves for one episode slot upsert to one row, newest wins"
+
+# Two saves for a FILM slot: season and episode are both NULL here.
+ACTJAR="$JAR" post_action "$BASE/watch/movie/550" "\$ACTION_ID_$SAVE" \
+  kind=movie tmdbId=550 position=600 >/dev/null
+ACTJAR="$JAR" post_action "$BASE/watch/movie/550" "\$ACTION_ID_$SAVE" \
+  kind=movie tmdbId=550 position=700 >/dev/null
+FCOUNT=$(db_scalar "SELECT COUNT(*) FROM playback_progress WHERE kind='movie' AND tmdbId=550")
+[[ "$FCOUNT" == "1" ]] || fail "two saves for one film slot produced $FCOUNT rows — the NULL slot collided"
+FPOS=$(db_scalar "SELECT positionSeconds FROM playback_progress WHERE kind='movie' AND tmdbId=550")
+[[ "$FPOS" == "700" ]] || fail "film position is $FPOS, expected the newest (700)"
+echo "ok  a film slot with NULL season/episode also upserts to one row"
 rm -f "$JAR2"
 
 # --- social: follows, feed, lists ----------------------------------------
