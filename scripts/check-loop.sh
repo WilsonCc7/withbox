@@ -412,6 +412,81 @@ CODE=$(curl -s -m 15 "$BASE/people?page=2" -b "$JAR2" -o /tmp/pg-p2.html -w '%{h
 [[ "$CODE" == "200" ]] || fail "/people?page=2 returned $CODE"
 echo "ok  /people?page=2 renders"
 
+# --- pagination actually engages -----------------------------------------
+# The robustness checks above only prove junk input is tolerated. This seeds a
+# KNOWN number of activities for a fresh account and proves the pages partition
+# them exactly: 37 items -> page 1 carries 30 and offers Older, page 2 carries
+# the remaining 7 and offers nothing further. Summing both pages is what proves
+# neither a skip (total < 37) nor a repeat (total > 37) at the boundary — which
+# is the failure a timestamp-only cursor would produce, because a whole-season
+# mark writes every row with the SAME watchedAt.
+JAR3="$(mktemp)"
+curl -s -m 20 -X POST "$BASE/api/auth/sign-up/email" -H "Content-Type: application/json" \
+  -H "Origin: $BASE" -d "{\"email\":\"pager-$(date +%s)@example.com\",\"password\":\"$PASS\",\"name\":\"Pager\"}" \
+  -c "$JAR3" -o /dev/null
+
+seed_action() {
+  local url="$1" act="$2"
+  shift 2
+  local code
+  code=$(ACTJAR="$JAR3" post_action "$url" "$act" "$@")
+  [[ "$code" == "200" || "$code" == "303" ]] || fail "seed action returned $code"
+}
+
+# One POST marks a whole season; 34 episode rows across four seasons.
+mark_all_episodes() {
+  local tv="$1" season="$2" count="$3"
+  local eps
+  eps=$(seq -s, 1 "$count")
+  curl -s -m 15 "$BASE/tv/$tv/season/$season" -b "$JAR3" -o /tmp/seed-season.html
+  local act
+  act=$(action_for /tmp/seed-season.html markSeason)
+  [[ -n "$act" ]] || fail "no markSeason action on /tv/$tv/season/$season"
+  seed_action "$BASE/tv/$tv/season/$season" "$act" \
+    tmdbId="$tv" season="$season" episodes="$eps"
+}
+
+mark_all_episodes 94605 1 9
+mark_all_episodes 94605 2 9
+mark_all_episodes 82856 1 8
+mark_all_episodes 82856 2 8
+
+# Three more single activities: a film watch, a rating and a review.
+curl -s -m 15 "$BASE/movie/550" -b "$JAR3" -o /tmp/seed-film.html
+seed_action "$BASE/movie/550" "$(action_for /tmp/seed-film.html toggleWatched)" kind=movie tmdbId=550
+seed_action "$BASE/movie/550" "$(action_for /tmp/seed-film.html setRating)" kind=movie tmdbId=550 value=8
+seed_action "$BASE/movie/550" "$(action_for /tmp/seed-film.html setReview)" kind=movie tmdbId=550 body="Pagination seed."
+
+# Every row renders exactly one ISO date, so counting dates counts rows.
+count_rows() {
+  body "$1" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}' | wc -l || true
+}
+has_older() {
+  grep -qE 'href="/feed\?before=' "$1"
+}
+
+curl -s -m 15 "$BASE/feed" -b "$JAR3" -o /tmp/pg1.html
+P1=$(count_rows /tmp/pg1.html)
+[[ "$P1" == "30" ]] || fail "feed page 1 has $P1 rows, expected 30"
+has_older /tmp/pg1.html || fail "feed page 1 does not offer an Older link"
+
+OLDER=$(python3 -c "
+import re
+h = open('/tmp/pg1.html').read()
+m = re.search(r'href=\"(/feed\?before=[^\"]+)\"', h)
+print(m.group(1).replace('&amp;', '&') if m else '')
+" || true)
+[[ -n "$OLDER" ]] || fail "could not read the Older link href"
+
+curl -s -m 15 "$BASE$OLDER" -b "$JAR3" -o /tmp/pg2.html
+P2=$(count_rows /tmp/pg2.html)
+has_older /tmp/pg2.html && fail "the last feed page still offers an Older link"
+
+TOTAL=$((P1 + P2))
+[[ "$TOTAL" == "37" ]] || fail "the two pages covered $TOTAL rows, expected 37 (skip or repeat at the boundary)"
+echo "ok  feed partitions 37 activities into 30 + $P2 with no skip or repeat"
+rm -f "$JAR3"
+
 unset ACTJAR
 rm -f "$JAR2"
 
