@@ -369,6 +369,50 @@ STATUS=$(post_action "$BASE/lists/$LID" "$RM" listId="$LID" kind=movie tmdbId=55
 curl -s -m 15 "$BASE/lists/$LID" -b "$JAR2" -o /tmp/list-after.html
 body /tmp/list-after.html | grep -q "Fight Club" && fail "removed title is still on the list"
 echo "ok  title removed from list"
+
+# --- pagination robustness -----------------------------------------------
+# A hand-edited or stale cursor must degrade to the first page, never 500 and
+# never an error page. These are the failure modes a user actually hits by
+# editing the URL or following a bookmarked link after the data moved.
+curl -s -m 15 "$BASE/feed" -b "$JAR2" -o /tmp/pg-feed.html
+body /tmp/pg-feed.html > /tmp/pg-feed-base.txt
+for q in "before=abc" "before=999-" "before=-1" "before="; do
+  CODE=$(curl -s -m 15 "$BASE/feed?$q" -b "$JAR2" -o /tmp/pg-f.html -w '%{http_code}')
+  [[ "$CODE" == "200" ]] || fail "/feed?$q returned $CODE"
+  body /tmp/pg-f.html > /tmp/pg-f.txt
+  diff -q /tmp/pg-feed-base.txt /tmp/pg-f.txt >/dev/null \
+    || fail "/feed?$q did not fall back to the first page"
+done
+echo "ok  /feed falls back to the first page on a junk cursor"
+
+# A well-formed but absurd cursor is NOT junk: it parses, so it is accepted and
+# simply selects every row. It must return a real page, not an error.
+CODE=$(curl -s -m 15 "$BASE/feed?before=999999999999999-x" -b "$JAR2" -o /tmp/pg-f2.html -w '%{http_code}')
+[[ "$CODE" == "200" ]] || fail "/feed with a far-future cursor returned $CODE"
+body /tmp/pg-f2.html | grep -q "watched" \
+  || fail "/feed with a far-future cursor returned no rows"
+echo "ok  /feed accepts a well-formed far-future cursor"
+
+curl -s -m 15 "$BASE/people" -b "$JAR2" -o /tmp/pg-people.html
+body /tmp/pg-people.html > /tmp/pg-people-base.txt
+for q in "page=abc" "page=0" "page=-1" "page=1.5" "page=" "page=99999"; do
+  CODE=$(curl -s -m 15 "$BASE/people?$q" -b "$JAR2" -o /tmp/pg-p.html -w '%{http_code}')
+  [[ "$CODE" == "200" ]] || fail "/people?$q returned $CODE"
+done
+for q in "page=abc" "page=0" "page=-1" "page=1.5" "page="; do
+  curl -s -m 15 "$BASE/people?$q" -b "$JAR2" -o /tmp/pg-p.html
+  body /tmp/pg-p.html > /tmp/pg-p.txt
+  diff -q /tmp/pg-people-base.txt /tmp/pg-p.txt >/dev/null \
+    || fail "/people?$q did not fall back to page 1"
+done
+echo "ok  /people falls back to page 1 on a junk page value"
+
+# Page 2 must not repeat page 1, and must not be an error page.
+CODE=$(curl -s -m 15 "$BASE/people?page=2" -b "$JAR2" -o /tmp/pg-p2.html -w '%{http_code}')
+[[ "$CODE" == "200" ]] || fail "/people?page=2 returned $CODE"
+echo "ok  /people?page=2 renders"
+
+unset ACTJAR
 rm -f "$JAR2"
 
 echo "ALL CHECKS PASSED"

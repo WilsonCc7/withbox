@@ -1,4 +1,5 @@
 import {
+ type AnyColumn,
  and,
  count,
  desc,
@@ -6,6 +7,7 @@ import {
  inArray,
  isNotNull,
  isNull,
+ lt,
  ne,
  or,
  sql,
@@ -20,8 +22,30 @@ import {
  user,
  watchEntry,
 } from "@/db/schema";
-import type { ActivityItem, ListSummary, UserSummary } from "./types";
+import type {
+ ActivityCursor,
+ ActivityItem,
+ ActivityPage,
+ ListSummary,
+ UserSummary,
+} from "./types";
 import type { MediaRef } from "@/lib/library/types";
+
+/**
+ * Keyset predicate for a `(timestamp, id)` cursor: strictly older rows, with
+ * the row id breaking ties. Inlined per source because each pair of columns is
+ * a different Drizzle type.
+ */
+function olderThan(
+ at: AnyColumn,
+ id: AnyColumn,
+ cursor: ActivityCursor,
+) {
+ return or(
+  lt(at, cursor.at),
+  and(eq(at, cursor.at), lt(id, cursor.id)),
+ );
+}
 
 /**
  * Reads only. Everything takes the ids it needs explicitly — the
@@ -104,8 +128,13 @@ export async function getFollowing(
  */
 export async function getActivity(
  viewerId: string,
- limit?: number,
-): Promise<ActivityItem[]> {
+ options: { limit?: number; before?: ActivityCursor } = {},
+): Promise<ActivityPage> {
+ const limit = options.limit ?? 30;
+ const before = options.before;
+ // One row beyond the page: enough to prove a further page exists without a
+ // COUNT or an extra round trip.
+ const fetchLimit = limit + 1;
  const followed = await getDb()
   .select({ followingId: follow.followingId })
   .from(follow)
@@ -118,6 +147,7 @@ export async function getActivity(
   // admits every legitimate watch row and nothing else.
   getDb()
    .select({
+    id: watchEntry.id,
     userId: watchEntry.userId,
     userName: user.name,
     at: watchEntry.watchedAt,
@@ -132,12 +162,14 @@ export async function getActivity(
     and(
      inArray(watchEntry.userId, scope),
      or(isNull(watchEntry.season), isNotNull(watchEntry.episode)),
+     before ? olderThan(watchEntry.watchedAt, watchEntry.id, before) : undefined,
     ),
    )
-   .orderBy(desc(watchEntry.watchedAt))
-   .limit(limit ?? 30),
+   .orderBy(desc(watchEntry.watchedAt), desc(watchEntry.id))
+   .limit(fetchLimit),
   getDb()
    .select({
+    id: rating.id,
     userId: rating.userId,
     userName: user.name,
     at: rating.updatedAt,
@@ -147,11 +179,17 @@ export async function getActivity(
    })
    .from(rating)
    .innerJoin(user, eq(rating.userId, user.id))
-   .where(inArray(rating.userId, scope))
-   .orderBy(desc(rating.updatedAt))
-   .limit(limit ?? 30),
+   .where(
+    and(
+     inArray(rating.userId, scope),
+     before ? olderThan(rating.updatedAt, rating.id, before) : undefined,
+    ),
+   )
+   .orderBy(desc(rating.updatedAt), desc(rating.id))
+   .limit(fetchLimit),
   getDb()
    .select({
+    id: review.id,
     userId: review.userId,
     userName: user.name,
     at: review.updatedAt,
@@ -162,26 +200,37 @@ export async function getActivity(
    })
    .from(review)
    .innerJoin(user, eq(review.userId, user.id))
-   .where(inArray(review.userId, scope))
-   .orderBy(desc(review.updatedAt))
-   .limit(limit ?? 30),
+   .where(
+    and(
+     inArray(review.userId, scope),
+     before ? olderThan(review.updatedAt, review.id, before) : undefined,
+    ),
+   )
+   .orderBy(desc(review.updatedAt), desc(review.id))
+   .limit(fetchLimit),
   getDb()
    .select({
+    id: list.id,
     userId: list.userId,
     userName: user.name,
     at: list.createdAt,
-    id: list.id,
     name: list.name,
    })
    .from(list)
    .innerJoin(user, eq(list.userId, user.id))
-   .where(inArray(list.userId, scope))
-   .orderBy(desc(list.createdAt))
-   .limit(limit ?? 30),
+   .where(
+    and(
+     inArray(list.userId, scope),
+     before ? olderThan(list.createdAt, list.id, before) : undefined,
+    ),
+   )
+   .orderBy(desc(list.createdAt), desc(list.id))
+   .limit(fetchLimit),
  ]);
 
  const items: ActivityItem[] = [
   ...watches.map((row) => ({
+   id: row.id,
    type: "watch" as const,
    user: { id: row.userId, name: row.userName },
    at: row.at,
@@ -190,6 +239,7 @@ export async function getActivity(
    episode: row.episode,
   })),
   ...ratings.map((row) => ({
+   id: row.id,
    type: "rating" as const,
    user: { id: row.userId, name: row.userName },
    at: row.at,
@@ -197,6 +247,7 @@ export async function getActivity(
    value: row.value,
   })),
   ...reviews.map((row) => ({
+   id: row.id,
    type: "review" as const,
    user: { id: row.userId, name: row.userName },
    at: row.at,
@@ -205,6 +256,7 @@ export async function getActivity(
    containsSpoilers: row.containsSpoilers,
   })),
   ...lists.map((row) => ({
+   id: row.id,
    type: "listed" as const,
    user: { id: row.userId, name: row.userName },
    at: row.at,
@@ -213,8 +265,24 @@ export async function getActivity(
   })),
  ];
 
- items.sort((a, b) => b.at.getTime() - a.at.getTime());
- return items.slice(0, limit ?? 30);
+ // Mirrors the SQL ordering exactly: timestamp descending, then id descending.
+ // The cursor predicate tests the same pair, so a page boundary can never skip
+ // a row that shares a timestamp with the last row of the previous page —
+ // which is exactly what a bulk season mark produces.
+ items.sort(
+  (a, b) =>
+   b.at.getTime() - a.at.getTime() ||
+   (a.id < b.id ? 1 : a.id > b.id ? -1 : 0),
+ );
+
+ const page = items.slice(0, limit);
+ const last = page[page.length - 1];
+ return {
+  items: page,
+  // `items.length > limit` can only happen because a source returned the
+  // extra row, so this proves a further page exists without a COUNT.
+  next: items.length > limit && last ? { at: last.at, id: last.id } : null,
+ };
 }
 
 /** Each list with its item count via a COUNT, not a per-list query. */
@@ -300,16 +368,27 @@ export async function isListOwner(
  * Every account except the viewer, ordered by name — the
  * "people to follow" directory. Explicit ids only, like the
  * other reads; follow state is the caller's job via isFollowing.
+ *
+ * Offset-paginated rather than keyset: the order is a name, which the user can
+ * change, so a name cursor would be unstable anyway; and the directory has no
+ * natural "newest first" head that shifts between loads. `user.id` is the
+ * secondary sort so the order is total and paging cannot repeat a row.
  */
 export async function listUsers(
  viewerId: string,
- limit?: number,
-): Promise<UserSummary[]> {
+ options: { limit?: number; offset?: number } = {},
+): Promise<{ users: UserSummary[]; hasMore: boolean }> {
+ const limit = options.limit ?? 50;
  const rows = await getDb()
   .select({ id: user.id, name: user.name })
   .from(user)
   .where(ne(user.id, viewerId))
-  .orderBy(user.name)
-  .limit(limit ?? 50);
- return rows.map((row) => ({ id: row.id, name: row.name }));
+  .orderBy(user.name, user.id)
+  .limit(limit + 1)
+  .offset(options.offset ?? 0);
+ // The extra row is the proof of a further page; it is not returned.
+ return {
+  users: rows.slice(0, limit).map((row) => ({ id: row.id, name: row.name })),
+  hasMore: rows.length > limit,
+ };
 }

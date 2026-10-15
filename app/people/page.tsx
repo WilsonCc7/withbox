@@ -3,8 +3,23 @@ import { SiteHeader } from "@/components/site-header";
 import { getFollowCounts, isFollowing, listUsers } from "@/lib/social/queries";
 import { currentUser } from "@/lib/session";
 
-export default async function PeoplePage() {
+const PAGE_SIZE = 50;
+const MAX_PAGE = 1000;
+
+/** 1-based page from the URL: digits only, clamped; anything else is page 1. */
+function parsePage(raw: string | undefined): number {
+  if (!raw || !/^\d+$/.test(raw)) return 1;
+  const page = Number.parseInt(raw, 10);
+  return Math.min(Math.max(page, 1), MAX_PAGE);
+}
+
+export default async function PeoplePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
   const viewer = await currentUser();
+  const page = parsePage((await searchParams).page);
 
   if (!viewer) {
     return (
@@ -22,9 +37,27 @@ export default async function PeoplePage() {
     );
   }
 
-  const people = await listUsers(viewer.id);
+  const { users, hasMore } = await listUsers(viewer.id, {
+    offset: (page - 1) * PAGE_SIZE,
+  });
 
-  if (people.length === 0) {
+  if (users.length === 0) {
+    if (page > 1) {
+      return (
+        <>
+          <SiteHeader />
+          <main className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+            <h1 className="text-xl">No more people.</h1>
+            <p className="mt-2">
+              <a className="text-accent hover:text-accent-hi" href="/people">
+                Back to the first page
+              </a>
+            </p>
+          </main>
+        </>
+      );
+    }
+
     return (
       <>
         <SiteHeader />
@@ -41,11 +74,8 @@ export default async function PeoplePage() {
   // One parallel fan-out: follow state and follower counts per
   // user, resolved together instead of sequential awaits per row.
   const details = await Promise.all(
-    people.map((person) =>
-      Promise.all([
-        isFollowing(viewer.id, person.id),
-        getFollowCounts(person.id),
-      ]),
+    users.map((person) =>
+      Promise.all([isFollowing(viewer.id, person.id), getFollowCounts(person.id)]),
     ),
   );
 
@@ -55,7 +85,7 @@ export default async function PeoplePage() {
       <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
         <h1 className="mb-6 text-xl font-semibold">People</h1>
         <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface">
-          {people.map((person, i) => {
+          {users.map((person, i) => {
             const [following, counts] = details[i];
             return (
               <li
@@ -84,6 +114,24 @@ export default async function PeoplePage() {
             );
           })}
         </ul>
+        <nav className="mt-6 flex items-center gap-4">
+          {page > 1 && (
+            <a
+              className="text-accent hover:text-accent-hi text-sm"
+              href={page - 1 <= 1 ? "/people" : `/people?page=${page - 1}`}
+            >
+              Newer
+            </a>
+          )}
+          {hasMore && (
+            <a
+              className="text-accent hover:text-accent-hi text-sm"
+              href={`/people?page=${page + 1}`}
+            >
+              Older
+            </a>
+          )}
+        </nav>
       </main>
     </>
   );
