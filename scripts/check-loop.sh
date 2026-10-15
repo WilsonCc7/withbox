@@ -31,8 +31,11 @@ done
 
 fail() { echo "FAIL: $1"; exit 1; }
 
-# Local D1 may be empty on a fresh start; this is idempotent.
-bash scripts/init-local-db.sh "$BASE"
+# Start from a known state. Local D1 persists across runs, so without this the
+# suite inherits whatever the previous run left behind — which has already
+# produced one false failure (a user identified by scraping a listing page).
+# The script refuses any non-loopback host.
+bash scripts/reset-local-db.sh "$BASE"
 
 # Extract the hidden action field name for a server action, e.g. "toggleWatched".
 action_for() {
