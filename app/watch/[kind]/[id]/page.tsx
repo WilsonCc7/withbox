@@ -64,18 +64,34 @@ export default async function WatchPage({
    ? `${media.title} — S${season}E${episode}`
    : media.title;
 
- // Auto-advance within a season only. Crossing into the next season would need
- // that season's episode list, which this page has no reason to load.
+ // Auto-advance, crossing season boundaries when the season runs out.
+ // Specials (season 0) are excluded from the sequence: they carry no episode
+ // order to continue, and advancing from season 1 into "specials" would be
+ // wrong.
  const nextHref = (() => {
   if (!isTv || season === undefined || episode === undefined) return null;
-  const seasonInfo = (media as TvDetail).seasons.find((s) => s.seasonNumber === season);
-  if (!seasonInfo || episode >= seasonInfo.episodeCount) return null;
+  const seasons = (media as TvDetail).seasons
+   .filter((s) => s.seasonNumber > 0 && s.episodeCount > 0)
+   .sort((a, b) => a.seasonNumber - b.seasonNumber);
+  const index = seasons.findIndex((s) => s.seasonNumber === season);
+  if (index === -1) return null;
+
+  let nextSeason = season;
+  let nextEpisode = episode + 1;
+  if (episode >= seasons[index].episodeCount) {
+   const following = seasons[index + 1];
+   // Final season: there is nothing after it, so playback just stops here.
+   if (!following) return null;
+   nextSeason = following.seasonNumber;
+   nextEpisode = 1;
+  }
+
   const params = new URLSearchParams({
-   season: String(season),
-   episode: String(episode + 1),
+   season: String(nextSeason),
+   episode: String(nextEpisode),
   });
   // Carry the source forward: without this, advancing would silently switch
-  // the viewer to a different provider mid-season.
+  // the viewer to a different provider mid-run.
   if (resolved) params.set("source", resolved.adapter.name);
   return `/watch/tv/${tmdbId}?${params.toString()}`;
  })();

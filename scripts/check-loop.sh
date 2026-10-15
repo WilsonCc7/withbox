@@ -335,6 +335,37 @@ grep -q 'episode=2' /tmp/nexthref.txt || fail "auto-advance link lost the episod
 grep -q 'source=vidlink' /tmp/nexthref.txt \
   || fail "auto-advance does not carry the source forward"
 echo "ok  auto-advance carries the source forward"
+
+# The auto-advance target for a watch URL, as the raw payload window around
+# `nextHref`. Escaping is left alone; callers grep for substrings inside it.
+next_window() {
+  curl -s -m 15 "$1" -b "$JAR" -o /tmp/nh.html
+  python3 -c "
+h = open('/tmp/nh.html').read()
+i = h.find('nextHref')
+print(h[i:i + 160] if i >= 0 else 'NONE')
+"
+}
+
+# Cross-season: the last episode of a season must advance into the NEXT season
+# rather than ending the run at every season boundary.
+CROSS=$(next_window "$BASE/watch/tv/94605?season=1&episode=9")
+[[ "$CROSS" == *season=2* ]] || fail "Arcane S1E9 did not advance into season 2: $CROSS"
+[[ "$CROSS" == *episode=1* ]] || fail "Arcane S1E9 did not land on episode 1: $CROSS"
+echo "ok  the last episode of a season advances into the next season"
+
+# The final episode of the final season ends the run.
+curl -s -m 15 "$BASE/watch/tv/94605?season=2&episode=9" -b "$JAR" -o /tmp/last-ep.html
+body /tmp/last-ep.html | grep -q "plays the next episode" \
+  && fail "the final episode of the show still advertises a next episode"
+echo "ok  the final episode of the show offers no next episode"
+
+# Specials (season 0) must be skipped: advancing season 1 -> "specials" would be
+# wrong, and a special has no episode order to continue.
+SPECIALS=$(next_window "$BASE/watch/tv/1399?season=1&episode=10")
+[[ "$SPECIALS" == *season=2* ]] || fail "Game of Thrones S1E10 did not advance to season 2: $SPECIALS"
+[[ "$SPECIALS" == *season=0* ]] && fail "advance walked into the specials season"
+echo "ok  advance skips the specials season"
 rm -f "$JAR2"
 
 # --- social: follows, feed, lists ----------------------------------------
