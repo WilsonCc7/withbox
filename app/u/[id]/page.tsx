@@ -14,12 +14,27 @@ import type { MediaDetail } from "@/lib/media/types";
 import { mediaSource } from "@/lib/media/runtime";
 import { currentUser } from "@/lib/session";
 
+/** Rows per page of the watched grid; matches the `getWatched` default. */
+const PAGE_SIZE = 60;
+
+/** `?page=N`, 1-based and digits only. Anything else falls back to page 1. */
+function parsePage(raw: string | undefined): number {
+  if (raw === undefined || !/^\d+$/.test(raw)) return 1;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 1) return 1;
+  // Cap so a hand-edited URL cannot ask for an absurd offset.
+  return Math.min(n, 1000);
+}
+
 export default async function ProfilePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ page?: string }>;
 }) {
   const { id } = await params;
+  const query = await searchParams;
   const viewer = await currentUser();
 
   // Single lookup for the profile user; the social queries all
@@ -47,9 +62,13 @@ export default async function ProfilePage({
   }
 
   const isSelf = viewer?.id === profile.id;
+  const page = parsePage(query.page);
   const [counts, watchedPage, lists, following] = await Promise.all([
     getFollowCounts(profile.id),
-    getWatched(profile.id, { limit: 24 }),
+    getWatched(profile.id, {
+      limit: PAGE_SIZE,
+      offset: (page - 1) * PAGE_SIZE,
+    }),
     getListsByUser(profile.id),
     viewer && !isSelf
       ? isFollowing(viewer.id, profile.id)
@@ -91,9 +110,57 @@ export default async function ProfilePage({
 
         <section className="pb-8">
           {watched.length === 0 ? (
-            <p className="text-muted">Nothing watched yet.</p>
+            page > 1 ? (
+              <p className="text-muted">
+                No more titles.{" "}
+                <a
+                  className="text-accent hover:text-accent-hi"
+                  href={`/u/${profile.id}`}
+                >
+                  Back to the first page
+                </a>
+              </p>
+            ) : (
+              <p className="text-muted">Nothing watched yet.</p>
+            )
           ) : (
-            <PosterGrid heading="Recently watched" items={watched} />
+            <>
+              {/* "Recently" is only accurate while the grid is the whole set;
+                  once it is paged the heading must not imply a total. */}
+              <PosterGrid
+                heading={
+                  page === 1 && !watchedPage.hasMore
+                    ? "Recently watched"
+                    : "Watched"
+                }
+                items={watched}
+              />
+              {(page > 1 || watchedPage.hasMore) && (
+                <nav className="mt-6 flex items-center gap-4 text-sm">
+                  {page > 1 && (
+                    <a
+                      className="text-accent hover:text-accent-hi"
+                      href={
+                        page - 1 <= 1
+                          ? `/u/${profile.id}`
+                          : `/u/${profile.id}?page=${page - 1}`
+                      }
+                    >
+                      Newer
+                    </a>
+                  )}
+                  <span className="text-muted">Page {page}</span>
+                  {watchedPage.hasMore && (
+                    <a
+                      className="text-accent hover:text-accent-hi"
+                      href={`/u/${profile.id}?page=${page + 1}`}
+                    >
+                      Older
+                    </a>
+                  )}
+                </nav>
+              )}
+            </>
           )}
         </section>
 

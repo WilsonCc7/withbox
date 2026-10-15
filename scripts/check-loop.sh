@@ -516,6 +516,21 @@ for path in watched watchlist; do
 done
 echo "ok  /watched and /watchlist tolerate junk page values"
 
+# The profile's watched grid is paged too. Its cap used to be a silent 24 with
+# no way to reach the rest.
+curl -s -m 15 "$BASE/u/$UID1" -b "$JAR" -o /tmp/prof-base.html
+body /tmp/prof-base.html > /tmp/prof-base.txt
+for q in "page=abc" "page=0" "page=-1" "page=1.5" "page="; do
+  CODE=$(curl -s -m 15 "$BASE/u/$UID1?$q" -b "$JAR" -o /tmp/prof-x.html -w '%{http_code}')
+  [[ "$CODE" == "200" ]] || fail "/u/<id>?$q returned $CODE"
+  body /tmp/prof-x.html > /tmp/prof-x.txt
+  diff -q /tmp/prof-base.txt /tmp/prof-x.txt >/dev/null \
+    || fail "/u/<id>?$q did not fall back to page 1"
+done
+CODE=$(curl -s -m 15 "$BASE/u/$UID1?page=99999" -b "$JAR" -o /dev/null -w '%{http_code}')
+[[ "$CODE" == "200" ]] || fail "/u/<id>?page=99999 returned $CODE"
+echo "ok  /u/[id] tolerates junk page values"
+
 # Page 2 must not repeat page 1, and must not be an error page.
 CODE=$(curl -s -m 15 "$BASE/people?page=2" -b "$JAR2" -o /tmp/pg-p2.html -w '%{http_code}')
 [[ "$CODE" == "200" ]] || fail "/people?page=2 returned $CODE"
