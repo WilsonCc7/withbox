@@ -17,7 +17,7 @@ export default async function Home() {
 
   let recent: MediaDetail[] = [];
   if (user) {
-    const watched = await getWatched(user.id, 12);
+    const { rows: watched } = await getWatched(user.id, { limit: 12 });
     recent = (
       await Promise.all(
         watched.map(async ({ ref }) =>

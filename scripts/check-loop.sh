@@ -465,6 +465,26 @@ for q in "page=abc" "page=0" "page=-1" "page=1.5" "page="; do
 done
 echo "ok  /people falls back to page 1 on a junk page value"
 
+# The library pages are now bounded by the page size, so they take a page
+# number too and must degrade the same way. NOTE: engagement cannot be tested
+# here — the fixture catalogue holds only 20 titles, well under the 60-row page
+# size, so no second page of /watched can be produced with fixture data.
+for path in watched watchlist; do
+  curl -s -m 15 "$BASE/$path" -b "$JAR" -o /tmp/lib-base.html
+  body /tmp/lib-base.html > /tmp/lib-base.txt
+  for q in "page=abc" "page=0" "page=-1" "page=1.5" "page="; do
+    CODE=$(curl -s -m 15 "$BASE/$path?$q" -b "$JAR" -o /tmp/lib-x.html -w '%{http_code}')
+    [[ "$CODE" == "200" ]] || fail "/$path?$q returned $CODE"
+    body /tmp/lib-x.html > /tmp/lib-x.txt
+    diff -q /tmp/lib-base.txt /tmp/lib-x.txt >/dev/null \
+      || fail "/$path?$q did not fall back to the first page"
+  done
+  # A huge page number is valid input; it must render, not throw.
+  CODE=$(curl -s -m 15 "$BASE/$path?page=99999" -b "$JAR" -o /dev/null -w '%{http_code}')
+  [[ "$CODE" == "200" ]] || fail "/$path?page=99999 returned $CODE"
+done
+echo "ok  /watched and /watchlist tolerate junk page values"
+
 # Page 2 must not repeat page 1, and must not be an error page.
 CODE=$(curl -s -m 15 "$BASE/people?page=2" -b "$JAR2" -o /tmp/pg-p2.html -w '%{http_code}')
 [[ "$CODE" == "200" ]] || fail "/people?page=2 returned $CODE"

@@ -5,7 +5,19 @@ import type { MediaDetail } from "@/lib/media/types";
 import { mediaSource } from "@/lib/media/runtime";
 import { currentUser } from "@/lib/session";
 
-export default async function WatchlistPage() {
+const PAGE_SIZE = 60;
+const MAX_PAGE = 1000;
+
+function parsePage(raw: string | undefined): number {
+  if (raw === undefined || !/^\d+$/.test(raw)) return 1;
+  return Math.min(Math.max(Number(raw), 1), MAX_PAGE);
+}
+
+export default async function WatchlistPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>;
+}) {
   const user = await currentUser();
 
   if (!user) {
@@ -24,7 +36,11 @@ export default async function WatchlistPage() {
     );
   }
 
-  const refs = await getWatchlist(user.id);
+  const page = parsePage((await searchParams).page);
+  const { refs, hasMore } = await getWatchlist(user.id, {
+    limit: PAGE_SIZE,
+    offset: (page - 1) * PAGE_SIZE,
+  });
   const source = mediaSource();
 
   const items = (
@@ -35,11 +51,14 @@ export default async function WatchlistPage() {
     )
   ).filter((item): item is MediaDetail => item !== null);
 
+  // The total is only known when the whole set fits on page 1.
+  const showTotal = page === 1 && !hasMore;
+
   return (
     <>
       <SiteHeader />
       <main className="mx-auto max-w-6xl px-4 pb-8 sm:px-6">
-        {items.length === 0 && (
+        {items.length === 0 && page === 1 && (
           <p className="pb-4 text-muted">
             Your watchlist is empty.{" "}
             <a className="text-accent hover:text-accent-hi" href="/">
@@ -47,7 +66,39 @@ export default async function WatchlistPage() {
             </a>
           </p>
         )}
-        <PosterGrid heading={`Watchlist (${items.length})`} items={items} />
+        {items.length === 0 && page > 1 && (
+          <p className="pb-4 text-muted">
+            No more titles.{" "}
+            <a className="text-accent hover:text-accent-hi" href="/watchlist">
+              Back to the first page
+            </a>
+          </p>
+        )}
+        {!showTotal && <p className="pb-4 text-muted text-sm">Page {page}</p>}
+        <PosterGrid
+          heading={showTotal ? `Watchlist (${items.length})` : "Watchlist"}
+          items={items}
+        />
+        {(page > 1 || hasMore) && (
+          <nav className="mt-6 flex items-center gap-4">
+            {page > 1 && (
+              <a
+                className="text-sm text-accent hover:text-accent-hi"
+                href={page - 1 <= 1 ? "/watchlist" : `/watchlist?page=${page - 1}`}
+              >
+                Newer
+              </a>
+            )}
+            {hasMore && (
+              <a
+                className="text-sm text-accent hover:text-accent-hi"
+                href={`/watchlist?page=${page + 1}`}
+              >
+                Older
+              </a>
+            )}
+          </nav>
+        )}
       </main>
     </>
   );

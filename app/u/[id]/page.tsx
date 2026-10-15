@@ -47,9 +47,9 @@ export default async function ProfilePage({
   }
 
   const isSelf = viewer?.id === profile.id;
-  const [counts, watchedRefs, lists, following] = await Promise.all([
+  const [counts, watchedPage, lists, following] = await Promise.all([
     getFollowCounts(profile.id),
-    getWatched(profile.id, 24),
+    getWatched(profile.id, { limit: 24 }),
     getListsByUser(profile.id),
     viewer && !isSelf
       ? isFollowing(viewer.id, profile.id)
@@ -59,7 +59,7 @@ export default async function ProfilePage({
   const source = mediaSource();
   const watched = (
     await Promise.all(
-      watchedRefs.map(async ({ ref }) =>
+      watchedPage.rows.map(async ({ ref }) =>
         ref.kind === "movie"
           ? await source.movie(ref.tmdbId)
           : await source.tv(ref.tmdbId),
