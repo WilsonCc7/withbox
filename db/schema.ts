@@ -206,6 +206,30 @@ export const watchlistItem = sqliteTable(
     index("watchlist_user_added").on(table.userId, table.addedAt),
   ],
 );
+
+export const playbackProgress = sqliteTable(
+  "playback_progress",
+  {
+    id: text("id").primaryKey(),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["movie", "tv"] }).notNull(),
+    tmdbId: integer("tmdbId").notNull(),
+    season: integer("season"),
+    episode: integer("episode"),
+    slotKey: text("slotKey").notNull(),
+    positionSeconds: integer("positionSeconds").notNull(),
+    durationSeconds: integer("durationSeconds"),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" })
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [
+    uniqueIndex("playback_progress_slot").on(table.userId, table.slotKey),
+    index("playback_progress_user_index").on(table.userId),
+  ],
+);
 /**
  * Social tables.
  *
@@ -281,6 +305,7 @@ export const schema = {
   review,
   watchlistItem,
   follow,
+  playbackProgress,
   list,
   listItem,
 };

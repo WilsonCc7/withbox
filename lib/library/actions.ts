@@ -4,9 +4,16 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
-import { rating, review, watchEntry, watchlistItem } from "@/db/schema";
+import {
+  playbackProgress,
+  rating,
+  review,
+  watchEntry,
+  watchlistItem,
+} from "@/db/schema";
 import type { MediaKind } from "@/lib/media/types";
 import { currentUser } from "@/lib/session";
+import { progressSlot } from "./types";
 
 /**
  * Server actions. Every one takes `FormData` so a plain
@@ -384,4 +391,81 @@ export async function markSeason(formData: FormData): Promise<void> {
     );
   }
   await revalidatePaths(pathsForSeason(tmdbId, season));
+}
+
+/**
+ * Progress fields arrive from a client timer, so nothing here throws —
+ * a malformed value reports `malformed` and the action returns
+ * silently. An absent optional field parses to `null` ("not
+ * applicable"), matching the watch-entry parsers above.
+ */
+function parseProgressField(
+  raw: FormDataEntryValue | null,
+): { value: number | null; malformed: boolean } {
+  const trimmed = String(raw ?? "").trim();
+  if (trimmed === "") return { value: null, malformed: false };
+  const value = Number(trimmed);
+  if (!Number.isInteger(value) || value < 0) {
+    return { value: null, malformed: true };
+  }
+  return { value, malformed: false };
+}
+
+/**
+ * Playback position, reported by the player's timer.
+ *
+ * Upserts in ONE statement on (userId, slotKey): it is called
+ * repeatedly and concurrently from a player, so a read-then-write
+ * would race. Never throws or redirects — a client timer must not
+ * surface errors — and deliberately revalidates nothing: it fires too
+ * often to invalidate renders. A `position` of 0 is stored; the page
+ * decides what counts as resumable.
+ */
+export async function saveProgress(formData: FormData): Promise<void> {
+  const user = await currentUser();
+  if (!user) return;
+
+  const kind = formData.get("kind");
+  if (kind !== "movie" && kind !== "tv") return;
+
+  const tmdbId = parseProgressField(formData.get("tmdbId"));
+  const position = parseProgressField(formData.get("position"));
+  if (
+    tmdbId.malformed ||
+    tmdbId.value === null ||
+    tmdbId.value <= 0 ||
+    position.malformed ||
+    position.value === null
+  ) {
+    return;
+  }
+
+  const season = parseProgressField(formData.get("season"));
+  const episode = parseProgressField(formData.get("episode"));
+  const duration = parseProgressField(formData.get("duration"));
+  if (season.malformed || episode.malformed || duration.malformed) return;
+
+  const db = getDb();
+  await db
+    .insert(playbackProgress)
+    .values({
+      id: crypto.randomUUID(),
+      userId: user.id,
+      kind,
+      tmdbId: tmdbId.value,
+      season: season.value,
+      episode: episode.value,
+      slotKey: progressSlot(kind, tmdbId.value, season.value, episode.value),
+      positionSeconds: position.value,
+      durationSeconds: duration.value,
+      updatedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [playbackProgress.userId, playbackProgress.slotKey],
+      set: {
+        positionSeconds: position.value,
+        durationSeconds: duration.value,
+        updatedAt: new Date(),
+      },
+    });
 }

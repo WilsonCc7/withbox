@@ -9,6 +9,9 @@
  * Input validation lives here, at the seam boundary: a non-integer or
  * non-positive `tmdbId`, or a TV request with `episode` but no
  * `season`, resolves to `null` before any adapter runs.
+ *
+ * `resolveAll` also takes a `startAtSeconds` resume hint and forwards
+ * it to every adapter; only adapters with `resumes: true` honour it.
  */
 import { createFramextvAdapter } from "./framextv";
 import { createVidlinkAdapter } from "./vidlink";
@@ -38,9 +41,10 @@ export interface StreamResult {
  * from the result instead of breaking playback or starving the others.
  */
 export async function resolveAll(
- tmdbId: number,
- season?: number,
- episode?: number,
+  tmdbId: number,
+  season?: number,
+  episode?: number,
+  startAtSeconds?: number,
 ): Promise<StreamResult[]> {
  const validId = Number.isInteger(tmdbId) && tmdbId > 0;
  const validTv = episode === undefined || season !== undefined;
@@ -51,7 +55,7 @@ export async function resolveAll(
  const results: StreamResult[] = [];
  for (const adapter of SOURCES) {
   try {
-   const resolution = await adapter.resolve(tmdbId, season, episode);
+   const resolution = await adapter.resolve(tmdbId, season, episode, startAtSeconds);
    if (resolution !== null) {
     results.push({ adapter, resolution });
    }

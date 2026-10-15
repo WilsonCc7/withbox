@@ -2,9 +2,15 @@ import type { MediaKind } from "@/lib/media/types";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { unionAll } from "drizzle-orm/sqlite-core";
 import { getDb } from "@/lib/db";
-import { rating, review, watchEntry, watchlistItem } from "@/db/schema";
+import {
+  playbackProgress,
+  rating,
+  review,
+  watchEntry,
+  watchlistItem,
+} from "@/db/schema";
 import type { EpisodeMark, MediaRef, WatchState } from "./types";
-import { mediaKey } from "./types";
+import { mediaKey, progressSlot } from "./types";
 
 const EMPTY_WATCH_STATE: WatchState = {
  watched: false,
@@ -291,4 +297,33 @@ export async function isInWatchlist(
   )
   .limit(1);
  return rows.length > 0;
+}
+
+/**
+ * Latest stored playback position for one slot (a film, or one
+ * episode), or null when nothing is stored yet.
+ */
+export async function getProgress(
+  userId: string,
+  ref: MediaRef,
+  season?: number,
+  episode?: number,
+): Promise<{ positionSeconds: number; durationSeconds: number | null } | null> {
+  const rows = await getDb()
+    .select({
+      positionSeconds: playbackProgress.positionSeconds,
+      durationSeconds: playbackProgress.durationSeconds,
+    })
+    .from(playbackProgress)
+    .where(
+      and(
+        eq(playbackProgress.userId, userId),
+        eq(
+          playbackProgress.slotKey,
+          progressSlot(ref.kind, ref.tmdbId, season ?? null, episode ?? null),
+        ),
+      ),
+    )
+    .limit(1);
+  return rows[0] ?? null;
 }

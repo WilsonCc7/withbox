@@ -5,9 +5,11 @@
  * components depend only on these types — nothing outside `lib/sources/`
  * constructs a third-party player URL.
  *
- * `progress: true` means the embed posts playback position back and the
- * app can resume and auto-advance. `progress: false` means the user marks
- * watched manually.
+ * Two different capabilities, deliberately kept separate:
+ * - `Resolution.progress` — the embed REPORTS playback position back,
+ *   which is what makes resume possible at all.
+ * - `SourceAdapter.resumes` — the embed ACCEPTS a start position.
+ *   Only adapters with `resumes: true` honour `startAtSeconds`.
  */
 export type Resolution =
   | { kind: "iframe"; url: string; progress: boolean }
@@ -16,5 +18,17 @@ export type Resolution =
 export interface SourceAdapter {
   name: string;
   label: string;
-  resolve(tmdbId: number, season?: number, episode?: number): Promise<Resolution | null>;
+  /** Whether this adapter honours `startAtSeconds`. */
+  resumes: boolean;
+  /**
+   * `startAtSeconds` is a resume hint an adapter may ignore — see
+   * `resumes`. It is only passed for slots the player actually holds a
+   * position for.
+   */
+  resolve(
+    tmdbId: number,
+    season?: number,
+    episode?: number,
+    startAtSeconds?: number,
+  ): Promise<Resolution | null>;
 }

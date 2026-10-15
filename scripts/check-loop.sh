@@ -369,6 +369,51 @@ SPECIALS=$(next_window "$BASE/watch/tv/1399?season=1&episode=10")
 [[ "$SPECIALS" == *season=2* ]] || fail "Game of Thrones S1E10 did not advance to season 2: $SPECIALS"
 [[ "$SPECIALS" == *season=0* ]] && fail "advance walked into the specials season"
 echo "ok  advance skips the specials season"
+
+# --- resume --------------------------------------------------------------
+# The position is stored per slot, and only an adapter that reports position
+# can be handed one back. `saveProgress` is passed as a PROP to the bridge, so
+# like markWatched it has no hidden form field — its id comes from the payload.
+curl -s -m 15 "$WATCH" -b "$JAR" -o /tmp/resume-probe.html
+SAVE=$(python3 -c "
+import re
+s = open('/tmp/resume-probe.html').read()
+m = re.search(r'id..:..([0-9a-f]{6,}#saveProgress)', s)
+print(m.group(1) if m else '')
+" || true)
+[[ -n "$SAVE" ]] || fail "saveProgress action id absent from the watch page payload"
+
+seed_progress() {
+  local code
+  # The payload carries the bare `hash#name`; the form field needs the
+  # `$ACTION_ID_` prefix, which post_action does not add (find-action.py
+  # returns the prefixed form, this extraction does not).
+  code=$(ACTJAR="$JAR" post_action "$WATCH" "\$ACTION_ID_$SAVE" \
+    kind=tv tmdbId=94605 season=1 episode=1 position="$1")
+  [[ "$code" == "200" || "$code" == "303" ]] || fail "saveProgress returned $code"
+}
+
+seed_progress 900
+curl -s -m 15 "$WATCH&source=vidsrc" -b "$JAR" -o /tmp/resume-vidsrc.html
+RS=$(iframe_src /tmp/resume-vidsrc.html)
+[[ "$RS" == *startAt=900* ]] || fail "vidsrc did not receive the resume position: $RS"
+body /tmp/resume-vidsrc.html | grep -qi "resum" \
+  || fail "no resume note shown for an adapter that honours it"
+
+# vidlink reports position but has no documented resume parameter, so the page
+# must neither pass one nor claim to be resuming.
+curl -s -m 15 "$WATCH&source=vidlink" -b "$JAR" -o /tmp/resume-vidlink.html
+RL=$(iframe_src /tmp/resume-vidlink.html)
+[[ "$RL" != *startAt* ]] || fail "vidlink was handed a startAt it does not honour: $RL"
+body /tmp/resume-vidlink.html | grep -qi "resum" \
+  && fail "resume note shown for an adapter that ignores the position"
+
+# Just past the opening titles is worse than starting over.
+seed_progress 5
+curl -s -m 15 "$WATCH&source=vidsrc" -b "$JAR" -o /tmp/resume-tiny.html
+RT=$(iframe_src /tmp/resume-tiny.html)
+[[ "$RT" != *startAt* ]] || fail "a 5-second position was treated as resumable: $RT"
+echo "ok  resume is honoured only by adapters that support it, and only past the floor"
 rm -f "$JAR2"
 
 # --- social: follows, feed, lists ----------------------------------------

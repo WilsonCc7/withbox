@@ -33,3 +33,19 @@ export interface EpisodeMark {
 export function mediaKey(ref: MediaRef): string {
   return `${ref.kind}:${ref.tmdbId}`;
 }
+
+/**
+ * Stable key for one playback slot: a film is
+ * (kind, tmdbId, null, null), an episode is (kind, tmdbId,
+ * season, episode). This is the slot identity stored in
+ * `playback_progress.slotKey` — one definition so the read
+ * and write paths can never diverge on what a slot means.
+ */
+export function progressSlot(
+  kind: MediaKind,
+  tmdbId: number,
+  season: number | null,
+  episode: number | null,
+): string {
+  return [kind, tmdbId, season ?? "", episode ?? ""].join(":");
+}

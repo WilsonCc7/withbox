@@ -1,7 +1,9 @@
 import { PlayerFrame } from "@/components/player/player-frame";
 import { PlayerProgressBridge } from "@/components/player/player-progress-bridge";
 import { SiteHeader } from "@/components/site-header";
-import { markWatched } from "@/lib/library/actions";
+import { getProgress } from "@/lib/library/queries";
+import { markWatched, saveProgress } from "@/lib/library/actions";
+import { currentUser } from "@/lib/session";
 import { mediaSource } from "@/lib/media/runtime";
 import { pickStream, resolveAll } from "@/lib/sources";
 import type { TvDetail } from "@/lib/media/types";
@@ -49,6 +51,25 @@ export default async function WatchPage({
   : await mediaSource().tv(tmdbId);
  if (!media) return message(`Nothing found for id ${tmdbId}.`);
 
+ // Resuming three seconds in is worse than starting over: a
+ // stored position below the floor is noise, not a resume
+ // point, so it is deliberately dropped rather than passed.
+ const RESUME_MIN_SECONDS = 30;
+
+ const user = await currentUser();
+ const stored = user
+  ? await getProgress(
+   user.id,
+   { kind: isTv ? "tv" : "movie", tmdbId },
+   isTv ? season : undefined,
+   isTv ? episode : undefined,
+  )
+  : null;
+ const resumeSeconds =
+  stored && stored.positionSeconds > RESUME_MIN_SECONDS
+   ? stored.positionSeconds
+   : undefined;
+
  // Every adapter that can serve this request, so the page can both choose one
  // and offer the others. Resolving all of them is free: adapters build a URL
  // and perform no I/O. Which one plays is decided in lib/sources, not here.
@@ -56,8 +77,26 @@ export default async function WatchPage({
   tmdbId,
   isTv ? season : undefined,
   isTv ? episode : undefined,
+  resumeSeconds,
  );
  const resolved = pickStream(options, query.source);
+
+ // Only claim "resuming" when it is true: the active adapter must
+ // honour startAtSeconds. vidlink and framextv ignore the hint,
+ // so saying "resuming" for them would be a lie.
+ const resuming =
+  resumeSeconds !== undefined && resolved?.adapter.resumes === true;
+
+ /** Formats a position as m:ss, or h:mm:ss past an hour. */
+ function formatPosition(seconds: number): string {
+  const total = Math.floor(seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  const mm = String(minutes).padStart(2, "0");
+  const ss = String(secs).padStart(2, "0");
+  return hours > 0 ? `${hours}:${mm}:${ss}` : `${minutes}:${ss}`;
+ }
 
  const heading =
   isTv && season !== undefined && episode !== undefined
@@ -127,6 +166,7 @@ export default async function WatchPage({
         kind={isTv ? "tv" : "movie"}
         markAction={markWatched}
         nextHref={nextHref}
+        saveAction={saveProgress}
         season={isTv ? (season ?? null) : null}
         tmdbId={tmdbId}
        />
@@ -151,6 +191,11 @@ export default async function WatchPage({
           {option.adapter.label}
          </a>
         ),
+       )}
+       {resuming && resumeSeconds !== undefined && (
+        <span className="text-faint">
+         resuming from {formatPosition(resumeSeconds)}
+        </span>
        )}
       </div>
       <p className="mt-1 text-xs text-faint">
