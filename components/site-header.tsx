@@ -12,11 +12,20 @@ export async function SiteHeader({ defaultQuery = "" }: { defaultQuery?: string 
         </a>
 
         <nav className="flex items-center gap-4 text-sm">
+          <a className="text-muted hover:text-fg" href="/feed">
+            Feed
+          </a>
           <a className="text-muted hover:text-fg" href="/watched">
             Watched
           </a>
           <a className="text-muted hover:text-fg" href="/watchlist">
             Watchlist
+          </a>
+          <a className="text-muted hover:text-fg" href="/lists">
+            Lists
+          </a>
+          <a className="text-muted hover:text-fg" href="/people">
+            People
           </a>
         </nav>
 

@@ -45,12 +45,15 @@ body() {
 }
 
 # POST one server action the way a no-JS browser would.
+# Authenticates as $ACTJAR when set, else the primary $JAR — multi-user checks
+# need to act as the second account, and silently using the first one is what
+# made an earlier version of the social check look like a product bug.
 post_action() {
   local url="$1" action="$2"
   shift 2
   local args=(-F "$action=")
   for kv in "$@"; do args+=(-F "$kv"); done
-  curl -s -m 20 -X POST "$url" -b "$JAR" -c "$JAR" -H "Origin: $BASE" \
+  curl -s -m 20 -X POST "$url" -b "${ACTJAR:-$JAR}" -c "${ACTJAR:-$JAR}" -H "Origin: $BASE" \
     "${args[@]}" -o /dev/null -w '%{http_code}'
 }
 
@@ -274,6 +277,98 @@ curl -s -m 15 "$BASE/tv/94605/season/1" -b "$JAR2" -o /tmp/mw2.html
 COUNT=$(body /tmp/mw2.html | grep -o "✓ Watched" | wc -l || true)
 [[ "$COUNT" == "1" ]] || fail "a second completion event changed the count to $COUNT"
 echo "ok  player completion action marks once and stays marked"
+rm -f "$JAR2"
+
+# --- social: follows, feed, lists ----------------------------------------
+# Needs a second account: following is only meaningful between two users.
+JAR2="$(mktemp)"
+curl -s -m 20 -X POST "$BASE/api/auth/sign-up/email" -H "Content-Type: application/json" \
+  -H "Origin: $BASE" -d "{\"email\":\"social-$(date +%s)@example.com\",\"password\":\"$PASS\",\"name\":\"Follower\"}" \
+  -c "$JAR2" -o /tmp/signup2.json
+UID2=$(python3 -c "import json;print(json.load(open('/tmp/signup2.json'))['user']['id'])" 2>/dev/null || true)
+[[ -n "$UID2" ]] || fail "could not read the second user's id from sign-up"
+
+# Discoverability: without /people the social graph is unreachable.
+curl -s -m 15 "$BASE/people" -b "$JAR2" -o /tmp/people.html
+body /tmp/people.html | grep -q "Loop" || fail "/people does not list the first user"
+# The header renders the signed-in user's own name, so a text check would match
+# it. Assert on the profile LINK instead: /people must not point at the viewer.
+grep -q "/u/$UID2" /tmp/people.html && fail "/people links to the viewer's own profile"
+# Take the id from the original sign-up response rather than scraping the first
+# profile link off /people. The local D1 accumulates accounts across runs, so
+# /people lists many users alphabetically and the first link belongs to some
+# earlier run's account — which has no activity for the feed to show.
+UID1=$(python3 -c "import json;print(json.load(open('/tmp/loop-signup.json'))['user']['id'])" 2>/dev/null || true)
+[[ -n "$UID1" ]] || fail "could not read the first user's id from sign-up"
+echo "ok  /people lists other users and not the viewer"
+
+# Everything below acts as the SECOND user. Without this, post_action would
+# authenticate as the first user and the "follow" would be a self-follow.
+ACTJAR="$JAR2"
+
+# Follow, then the feed must carry the followed user's activity.
+curl -s -m 15 "$BASE/u/$UID1" -b "$JAR2" -o /tmp/prof1.html
+FOLLOW=$(action_for /tmp/prof1.html follow)
+[[ -n "$FOLLOW" ]] || fail "no follow action on the profile page"
+STATUS=$(post_action "$BASE/u/$UID1" "$FOLLOW" userId="$UID1")
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "follow returned $STATUS"
+
+curl -s -m 15 "$BASE/feed" -b "$JAR2" -o /tmp/feed.html
+body /tmp/feed.html | grep -q "Fight Club" || fail "feed does not show the followed user's activity"
+echo "ok  follow works and the feed shows followed activity"
+
+# Following twice must not double-count, and self-follow must be refused.
+STATUS=$(post_action "$BASE/u/$UID1" "$FOLLOW" userId="$UID1")
+STATUS2=$(post_action "$BASE/u/$UID1" "$FOLLOW" userId="$UID2")
+curl -s -m 15 "$BASE/u/$UID2" -b "$JAR2" -o /tmp/prof2.html
+body /tmp/prof2.html | grep -q "1 following" \
+  || fail "following count is not 1 after a duplicate follow and a self-follow"
+echo "ok  follow is idempotent and self-follow is refused"
+
+# --- lists ---------------------------------------------------------------
+curl -s -m 15 "$BASE/lists" -b "$JAR2" -o /tmp/lists.html
+body /tmp/lists.html | grep -qi "no lists yet" || fail "/lists shows no empty state"
+CL=$(action_for /tmp/lists.html createList)
+[[ -n "$CL" ]] || fail "no createList action on /lists"
+STATUS=$(post_action "$BASE/lists" "$CL" name="Comfort films")
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "createList returned $STATUS"
+
+curl -s -m 15 "$BASE/lists" -b "$JAR2" -o /tmp/lists2.html
+body /tmp/lists2.html | grep -q "Comfort films" || fail "created list is not listed"
+LID=$(python3 -c "
+import re
+h = open('/tmp/lists2.html').read()
+m = re.search(r'/lists/([A-Za-z0-9_-]+)', h)
+print(m.group(1) if m else '')
+" || true)
+[[ -n "$LID" ]] || fail "no list link found on /lists"
+echo "ok  list created and listed"
+
+# Add a title from the film page — this is the only route into a list.
+curl -s -m 15 "$BASE/movie/550" -b "$JAR2" -o /tmp/film-add.html
+ADD=$(action_for /tmp/film-add.html addToList)
+[[ -n "$ADD" ]] || fail "no addToList action on the film page"
+grep -q 'name="listId"' /tmp/film-add.html || fail "film page has no list picker"
+STATUS=$(post_action "$BASE/movie/550" "$ADD" listId="$LID" kind=movie tmdbId=550)
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "addToList returned $STATUS"
+
+curl -s -m 15 "$BASE/lists/$LID" -b "$JAR2" -o /tmp/list-detail.html
+body /tmp/list-detail.html | grep -q "Fight Club" || fail "added title is not on the list"
+echo "ok  title added to list and shown"
+
+# A non-owner must see no add/remove/delete controls at all.
+curl -s -m 15 "$BASE/lists/$LID" -b "$JAR" -o /tmp/list-other.html
+body /tmp/list-other.html | grep -q "Comfort films" || fail "a non-owner cannot read the list"
+body /tmp/list-other.html | grep -q "Delete list" && fail "a non-owner is offered Delete list"
+echo "ok  list is readable by others but not editable"
+
+# Removal.
+RM=$(action_for /tmp/list-detail.html removeFromList)
+[[ -n "$RM" ]] || fail "no removeFromList action on the owner's list page"
+STATUS=$(post_action "$BASE/lists/$LID" "$RM" listId="$LID" kind=movie tmdbId=550)
+curl -s -m 15 "$BASE/lists/$LID" -b "$JAR2" -o /tmp/list-after.html
+body /tmp/list-after.html | grep -q "Fight Club" && fail "removed title is still on the list"
+echo "ok  title removed from list"
 rm -f "$JAR2"
 
 echo "ALL CHECKS PASSED"

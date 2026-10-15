@@ -206,7 +206,71 @@ export const watchlistItem = sqliteTable(
     index("watchlist_user_added").on(table.userId, table.addedAt),
   ],
 );
+/**
+ * Social tables.
+ *
+ * `follow` is a directed edge: `followerId` follows `followingId`.
+ * The unique pair index makes follow idempotent (a double-submit
+ * finds the row, not a constraint error); the reverse index backs
+ * "who follows me" lookups, which the pair index alone cannot
+ * serve.
+ *
+ * The activity feed is derived from `watch_entry`, `rating`,
+ * `review` and `list` rows at read time — there is deliberately
+ * no stored event log (a second copy of the truth to drift).
+ */
+export const follow = sqliteTable(
+  "follow",
+  {
+    id: text("id").primaryKey(),
+    followerId: text("followerId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    followingId: text("followingId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("follow_pair").on(table.followerId, table.followingId),
+    index("follow_following_index").on(table.followingId),
+  ],
+);
 
+export const list = sqliteTable(
+  "list",
+  {
+    id: text("id").primaryKey(),
+    userId: text("userId")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    createdAt: integer("createdAt", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updatedAt", { mode: "timestamp_ms" })
+      .notNull()
+      .$onUpdate(() => new Date()),
+  },
+  (table) => [index("list_user_index").on(table.userId)],
+);
+
+export const listItem = sqliteTable(
+  "list_item",
+  {
+    id: text("id").primaryKey(),
+    listId: text("listId")
+      .notNull()
+      .references(() => list.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["movie", "tv"] }).notNull(),
+    tmdbId: integer("tmdbId").notNull(),
+    position: integer("position").notNull(),
+    addedAt: integer("addedAt", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("list_item_media").on(table.listId, table.kind, table.tmdbId),
+    index("list_item_list_index").on(table.listId),
+  ],
+);
 export const schema = {
   user,
   session,
@@ -216,4 +280,7 @@ export const schema = {
   rating,
   review,
   watchlistItem,
+  follow,
+  list,
+  listItem,
 };

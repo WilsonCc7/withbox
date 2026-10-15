@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 # Apply the Drizzle migrations to the local development D1 database.
 #
-# Local D1 does not persist across server restarts (see `.omp/AGENTS.md`), so
-# this runs before any local check that touches the database. It goes through
-# the Cloudflare Vite plugin's Local Explorer API, which executes SQL against
-# the same database the Worker sees.
+# Runs before any local check that touches the database. It goes through the
+# Cloudflare Vite plugin's Local Explorer API, which executes SQL against the
+# same database the Worker sees.
+#
+# Statements are applied ONE AT A TIME and "already exists" is skipped, so the
+# script is idempotent *and* can add new tables to an existing local database.
+# It used to post every migration as a single batch: because SQLite DDL has no
+# IF NOT EXISTS here, the batch failed on the first table that already existed,
+# the whole request was abandoned, and a newly generated migration silently
+# never ran. The old code then printed "already migrated" and exited 0.
 #
 # Usage: scripts/init-local-db.sh [base-url]
 set -euo pipefail
@@ -25,39 +31,54 @@ python3 - "$API" "$UUID" <<'PY'
 import glob, json, sys, urllib.error, urllib.request
 
 api, uuid = sys.argv[1], sys.argv[2]
+
 stmts = []
 for path in sorted(glob.glob("drizzle/*.sql")):
     for chunk in open(path).read().split("--> statement-breakpoint"):
         sql = chunk.strip().rstrip(";").strip()
         if sql:
-            stmts.append({"sql": sql})
+            stmts.append((path, sql))
 
-body = json.dumps({"batch": stmts}).encode()
-req = urllib.request.Request(
-    f"{api}/d1/database/{uuid}/raw",
-    data=body,
-    headers={"Content-Type": "application/json"},
-    method="POST",
-)
-payload = None
-try:
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        payload = json.load(resp)
-except urllib.error.HTTPError as err:
-    # The batch endpoint reports statement failures as HTTP 500 with a JSON body.
+
+def run(sql):
+    """Execute one statement. Returns (ok, error_text)."""
+    body = json.dumps({"batch": [{"sql": sql}]}).encode()
+    req = urllib.request.Request(
+        f"{api}/d1/database/{uuid}/raw",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    payload = None
     try:
-        payload = json.loads(err.read().decode(errors="replace"))
-    except json.JSONDecodeError:
-        print(f"migration request failed: HTTP {err.code}", file=sys.stderr)
-        sys.exit(1)
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            payload = json.load(resp)
+    except urllib.error.HTTPError as err:
+        # Statement failures come back as HTTP 500 with a JSON body.
+        try:
+            payload = json.loads(err.read().decode(errors="replace"))
+        except json.JSONDecodeError:
+            return False, f"HTTP {err.code}"
+    if payload is None or not payload.get("success"):
+        return False, json.dumps(payload.get("errors") if payload else [])
+    return True, ""
 
-if not payload.get("success"):
-    text = json.dumps(payload.get("errors") or [])
-    if "already exists" in text:
-        print("local D1 already migrated")
-        sys.exit(0)
-    print("migration failed:", text[:500], file=sys.stderr)
+
+applied = skipped = 0
+for i, (path, sql) in enumerate(stmts, 1):
+    ok, err = run(sql)
+    if ok:
+        applied += 1
+        continue
+    if "already exists" in err:
+        skipped += 1
+        continue
+    print(f"migration failed in {path} (statement {i}): {err[:400]}", file=sys.stderr)
     sys.exit(1)
 
-print(f"applied {len(stmts)} statements to local D1 {uuid[:8]}")
+if applied:
+    print(f"applied {applied} statement(s) to local D1 {uuid[:8]}"
+          + (f", skipped {skipped} already present" if skipped else ""))
+else:
+    print(f"local D1 already up to date ({skipped} statement(s) present)")
 PY

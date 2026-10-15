@@ -1,9 +1,12 @@
 import { MediaLibraryPanel } from "@/components/media-library-panel";
 import { SiteHeader } from "@/components/site-header";
+import { AddToListPicker } from "@/components/social/list-toolbar";
 import { getWatchState, isInWatchlist } from "@/lib/library/queries";
 import { imageUrl } from "@/lib/media/images";
+import { getListsByUser } from "@/lib/social/queries";
 import { mediaSource } from "@/lib/media/runtime";
 import { currentUser } from "@/lib/session";
+
 
 export default async function TvPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -51,6 +54,7 @@ export default async function TvPage({ params }: { params: Promise<{ id: string 
   const [watchState, inWatchlist] = user
     ? await Promise.all([getWatchState(user.id, ref), isInWatchlist(user.id, ref)])
     : [null, false];
+  const lists = user ? await getListsByUser(user.id) : [];
 
   return (
     <>
@@ -119,6 +123,19 @@ export default async function TvPage({ params }: { params: Promise<{ id: string 
             </a>{" "}
             to track this series.
           </p>
+        )}
+        {user && lists.length === 0 && (
+          <p className="mt-4 text-xs text-muted">
+            <a className="text-accent hover:text-accent-hi" href="/lists">
+              Create a list
+            </a>{" "}
+            to group this with others.
+          </p>
+        )}
+        {user && lists.length > 0 && (
+          <div className="mt-4">
+            <AddToListPicker kind="tv" lists={lists} tmdbId={tmdbId} />
+          </div>
         )}
 
         <h2 className="mt-10 mb-4 text-lg font-semibold">Seasons</h2>

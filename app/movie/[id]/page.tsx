@@ -1,9 +1,12 @@
 import { MediaLibraryPanel } from "@/components/media-library-panel";
 import { SiteHeader } from "@/components/site-header";
+import { AddToListPicker } from "@/components/social/list-toolbar";
 import { getWatchState, isInWatchlist } from "@/lib/library/queries";
 import { imageUrl } from "@/lib/media/images";
+import { getListsByUser } from "@/lib/social/queries";
 import { mediaSource } from "@/lib/media/runtime";
 import { currentUser } from "@/lib/session";
+
 
 function formatRuntime(minutes: number | null): string | null {
   if (!minutes || minutes <= 0) return null;
@@ -53,6 +56,7 @@ export default async function MoviePage({ params }: { params: Promise<{ id: stri
   const [watchState, inWatchlist] = user
     ? await Promise.all([getWatchState(user.id, ref), isInWatchlist(user.id, ref)])
     : [null, false];
+  const lists = user ? await getListsByUser(user.id) : [];
 
   return (
     <>
@@ -134,6 +138,19 @@ export default async function MoviePage({ params }: { params: Promise<{ id: stri
             </a>{" "}
             to track this film.
           </p>
+        )}
+        {user && lists.length === 0 && (
+          <p className="mt-4 text-xs text-muted">
+            <a className="text-accent hover:text-accent-hi" href="/lists">
+              Create a list
+            </a>{" "}
+            to group this with others.
+          </p>
+        )}
+        {user && lists.length > 0 && (
+          <div className="mt-4">
+            <AddToListPicker kind="movie" lists={lists} tmdbId={tmdbId} />
+          </div>
         )}
       </main>
     </>
