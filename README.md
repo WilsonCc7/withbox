@@ -10,10 +10,25 @@ Deployed to Cloudflare Workers on your own domain.
 - **Diary** — every watch is its own row: date, rewatch flag, episode, review excerpt, and
   a delete that un-watches one watch without forgetting the title. Filter by year or month.
 - **Profiles** — avatar (R2), bio, stats, favourites, liked titles, recent diary, reviews.
-- **Rating badges** — IMDb and Rotten Tomatoes chips on posters and detail pages, plus a
-  TMDB fallback; real scores come from OMDb, cached so steady-state traffic is near zero.
-- **Discovery** — trending films and series, debounced instant search, cast and crew rows,
-  kind filters and a rating sort, list rename/reordering, and a paginated activity feed.
+- **Rating badges** — IMDb and Rotten Tomatoes chips on detail pages and the two library
+  pages (first 24 cards); real scores come from OMDb, cached in two layers so the steady
+  state is one KV read, and a title without a real score shows the TMDB chip instead.
+  Browse grids never call OMDb.
+- **Continue watching** — a rail on the home page for anything part-watched, with a
+  progress bar and a `Resume S1E3 · 18%` caption. A finished title drops out of it, using
+  the same 30-second floor and near-end rule the player applies.
+- **Stats** — `/stats`: counts, a per-year bar row, longest streak, top rated and genres,
+  every figure derived from rows at query time. `?year=2020` is the year in review.
+- **Import** — `/settings/import` takes Letterboxd's `watched.csv` / `ratings.csv` or
+  IMDb's ratings CSV. Matching is exact on title and year (a wrong import is worse than a
+  missed one), a re-run adds nothing, and unmatched rows are reported.
+- **Command palette** — `⌘K` / `Ctrl-K`, or `/` when focus is not in a field: jump to any
+  page or to a title, with the same search endpoint the header box uses.
+- **Account menu** — the header avatar opens Profile, Diary, Watchlist, Lists, Stats,
+  Settings and Sign out.
+- **Discovery** — trending films and series, debounced instant search, cast, a 4/6/8 cast
+  grid, more-like-this rows, kind filters and a rating sort, list rename/reordering, and a
+  paginated activity feed.
 - **Player** — pluggable stream-source adapters, resume positions, auto-advance, and a
   remembered source across visits.
 - **Mobile** — bottom tab bar, 2-up poster grids, touch-visible quick actions.
@@ -38,9 +53,13 @@ app/ (routes, RSC)   pages; never call TMDB directly
   lib/library/       user library: server actions + reads
   lib/social/        follow, feed, lists, activity
   lib/profile/       profile, bio, avatar actions
+  lib/stats/         derived library statistics (no counters)
+  lib/import/        CSV parse, export detection, import action
+  lib/player/        progress parsing, resume rules
   lib/sources/       stream source adapters (the seam)
   db/                Drizzle schema; migrations in drizzle/
-  components/        UI: shell + tab bar, poster grids, player shell
+  components/        UI: shell + tab bar, poster grids, palette, player shell
+  public/fonts/      self-hosted display face (next/font is a vinext gap)
 ```
 
 ## Requirements

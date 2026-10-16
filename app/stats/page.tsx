@@ -41,8 +41,7 @@ export default async function StatsPage({
   const stats = await getLibraryStats(user.id, year === null ? {} : { year });
 
   const chip = (active: boolean): string =>
-    `rounded-md border px-2.5 py-1 text-sm ${
-      active ? "border-accent text-fg" : "border-border text-muted hover:text-fg"
+    `rounded-md border px-2.5 py-1 text-sm ${active ? "border-accent text-fg" : "border-border text-muted hover:text-fg"
     }`;
 
   const topRatedRefs: MediaRef[] = stats.topRated.map((item) => item.ref);
@@ -147,7 +146,12 @@ export default async function StatsPage({
             <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
               {figures.map((figure) => (
                 <div key={figure.label}>
-                  <p className="text-3xl font-display tnum text-fg">{figure.value}</p>
+                  {/* `nowrap` keeps a date from breaking mid-value; the step
+                      down to 2xl keeps a 10-character value inside a 2-column
+                      cell at 390px, where 3xl would push the page wide. */}
+                  <p className="text-2xl font-display tnum text-fg sm:text-3xl">
+                    <span className="whitespace-nowrap">{figure.value}</span>
+                  </p>
                   <p className="text-sm text-muted">{figure.label}</p>
                 </div>
               ))}

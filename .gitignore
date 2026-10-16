@@ -12,3 +12,6 @@ tmdbapikey.md
 
 # Build artifacts.
 *.tsbuildinfo
+
+# Local design-tooling state (critique snapshots, overlay server).
+.impeccable/
