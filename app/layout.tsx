@@ -9,7 +9,8 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-bg text-fg">
+      <body className="min-h-screen bg-bg pb-20 text-fg sm:pb-0">
+        {/* pb-20 clears the fixed mobile tab bar, which is sm:hidden. */}
         {children}
         {/*
           TMDB attribution is a condition of using their API and must stay

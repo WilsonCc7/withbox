@@ -1,9 +1,17 @@
+import { CastRow } from "@/components/cast-row";
 import { MediaLibraryPanel } from "@/components/media-library-panel";
+import { RatingBadges } from "@/components/rating-badges";
 import { SiteHeader } from "@/components/site-header";
 import { AddToListPicker } from "@/components/social/list-toolbar";
-import { getWatchState, isInWatchlist } from "@/lib/library/queries";
+import {
+  getFavorites,
+  getWatchState,
+  isInWatchlist,
+  isLiked,
+} from "@/lib/library/queries";
 import { imageUrl } from "@/lib/media/images";
 import { getListsByUser } from "@/lib/social/queries";
+import { getRatings } from "@/lib/ratings";
 import { mediaSource } from "@/lib/media/runtime";
 import { currentUser } from "@/lib/session";
 
@@ -23,7 +31,8 @@ export default async function TvPage({ params }: { params: Promise<{ id: string 
     );
   }
 
-  const show = await mediaSource().tv(tmdbId);
+  const source = mediaSource();
+  const show = await source.tv(tmdbId);
 
   if (!show) {
     return (
@@ -51,9 +60,17 @@ export default async function TvPage({ params }: { params: Promise<{ id: string 
 
   const user = await currentUser();
   const ref = { kind: "tv" as const, tmdbId };
-  const [watchState, inWatchlist] = user
-    ? await Promise.all([getWatchState(user.id, ref), isInWatchlist(user.id, ref)])
-    : [null, false];
+  // One round trip for all post-detail work; per-user queries are
+  // skipped entirely when signed out.
+  const [ratings, credits, watchState, inWatchlist, liked, favorites] =
+    await Promise.all([
+      getRatings(source, ref),
+      source.credits("tv", tmdbId),
+      user ? getWatchState(user.id, ref) : null,
+      user ? isInWatchlist(user.id, ref) : false,
+      user ? isLiked(user.id, "tv", tmdbId) : false,
+      user ? getFavorites(user.id) : [],
+    ]);
   const lists = user ? await getListsByUser(user.id) : [];
 
   return (
@@ -73,7 +90,7 @@ export default async function TvPage({ params }: { params: Promise<{ id: string 
         </div>
 
         <div className="flex flex-col gap-6 sm:flex-row">
-          <div className="w-32 shrink-0 sm:w-48">
+          <div className="w-28 shrink-0 sm:w-48">
             {poster ? (
               <img
                 alt={show.title}
@@ -89,21 +106,22 @@ export default async function TvPage({ params }: { params: Promise<{ id: string 
 
           <div className="min-w-0">
             <p className="text-xs uppercase tracking-wide text-accent">Series</p>
-            <h1 className="mt-1 text-3xl font-semibold leading-tight">
+            <h1 className="mt-1 text-2xl font-semibold leading-tight sm:text-3xl">
               {show.title}
               {show.year && <span className="ml-2 font-normal text-muted">{show.year}</span>}
             </h1>
 
             {facts && <p className="mt-2 text-sm text-muted">{facts}</p>}
 
-            {show.voteAverage !== null && (
-              <p className="mt-2 text-sm text-muted">
-                <span className="text-accent">★ {show.voteAverage.toFixed(1)}</span>
-                {show.voteCount !== null && (
-                  <span className="text-faint"> ({show.voteCount.toLocaleString()} votes)</span>
-                )}
-              </p>
-            )}
+            <div className="mt-2">
+              <RatingBadges
+                imdb={ratings.imdb}
+                rt={ratings.rt}
+                tmdbScore={show.voteAverage}
+                voteCount={show.voteCount}
+                size="md"
+              />
+            </div>
 
             {show.overview && <p className="mt-4 max-w-2xl leading-7 text-muted">{show.overview}</p>}
           </div>
@@ -111,8 +129,10 @@ export default async function TvPage({ params }: { params: Promise<{ id: string 
 
         {user && watchState ? (
           <MediaLibraryPanel
+            favorites={favorites}
             inWatchlist={inWatchlist}
             kind="tv"
+            liked={liked}
             state={watchState}
             tmdbId={tmdbId}
           />
@@ -137,6 +157,12 @@ export default async function TvPage({ params }: { params: Promise<{ id: string 
             <AddToListPicker kind="tv" lists={lists} tmdbId={tmdbId} />
           </div>
         )}
+
+        <CastRow
+          cast={credits.cast}
+          crew={credits.crew}
+          createdBy={show.createdBy}
+        />
 
         <h2 className="mt-10 mb-4 text-lg font-semibold">Seasons</h2>
         <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">

@@ -1,9 +1,19 @@
+import { FavoriteToggle } from "@/components/library/favorite-toggle";
+import { LikeToggle } from "@/components/library/like-toggle";
+import { LogForm } from "@/components/library/log-form";
 import { ReviewForm } from "@/components/library/review-form";
 import { StarRating } from "@/components/library/star-rating";
 import { WatchToggle } from "@/components/library/watch-toggle";
 import { WatchlistToggle } from "@/components/library/watchlist-toggle";
-import { setRating, setReview, toggleWatched, toggleWatchlist } from "@/lib/library/actions";
-import type { WatchState } from "@/lib/library/types";
+import {
+  logWatch,
+  setRating,
+  setReview,
+  toggleLiked,
+  toggleWatched,
+  toggleWatchlist,
+} from "@/lib/library/actions";
+import type { MediaRef, WatchState } from "@/lib/library/types";
 import type { MediaKind } from "@/lib/media/types";
 
 /**
@@ -11,18 +21,31 @@ import type { MediaKind } from "@/lib/media/types";
  *
  * Server actions are imported here rather than in the presentational
  * components, which take them as props.
+ *
+ * `liked` and `favorites` are optional so a caller that has not loaded them
+ * renders no control rather than a control that cannot work.
  */
 export function MediaLibraryPanel({
   kind,
   tmdbId,
   state,
   inWatchlist,
+  liked,
+  favorites,
 }: {
   kind: MediaKind;
   tmdbId: number;
   state: WatchState;
   inWatchlist: boolean;
+  liked?: boolean;
+  favorites?: (MediaRef | null)[];
 }) {
+  const slotIndex =
+    favorites === undefined
+      ? -1
+      : favorites.findIndex((f) => f?.kind === kind && f?.tmdbId === tmdbId);
+  const currentSlot = slotIndex === -1 ? null : slotIndex;
+
   return (
     <section className="mt-8 flex flex-col gap-5 rounded-lg border border-border bg-surface p-4">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
@@ -38,6 +61,17 @@ export function MediaLibraryPanel({
           kind={kind}
           tmdbId={tmdbId}
         />
+        {liked !== undefined && (
+          <LikeToggle action={toggleLiked} kind={kind} liked={liked} tmdbId={tmdbId} />
+        )}
+        {favorites !== undefined && (
+          <FavoriteToggle
+            currentSlot={currentSlot}
+            kind={kind}
+            occupied={favorites.map((favorite) => favorite !== null)}
+            tmdbId={tmdbId}
+          />
+        )}
         {state.watchedAt && (
           <span className="text-xs text-faint">
             Last watched {state.watchedAt.toISOString().slice(0, 10)}
@@ -52,6 +86,14 @@ export function MediaLibraryPanel({
         body={state.review?.body ?? ""}
         containsSpoilers={state.review?.containsSpoilers ?? false}
         kind={kind}
+        tmdbId={tmdbId}
+      />
+
+      <LogForm
+        alreadyWatched={state.watched}
+        defaultDate={new Date().toISOString().slice(0, 10)}
+        kind={kind}
+        log={logWatch}
         tmdbId={tmdbId}
       />
     </section>

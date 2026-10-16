@@ -1,0 +1,104 @@
+/**
+ * IMDb / Rotten Tomatoes scores via OMDb.
+ *
+ * A TMDB id resolves to an IMDb id (cached 30d), then to scores (cached 7d).
+ * Every failure — missing key, no IMDb id, network error, timeout — degrades
+ * to `{ imdb: null, rt: null }` so callers fall back to the TMDB score.
+ * Nothing from this module throws.
+ */
+import { env } from "@/lib/env";
+import { mediaKey } from "@/lib/library/types";
+import type { MediaKind, MediaSource } from "@/lib/media/types";
+import { acquire } from "@/lib/rate-limit";
+import { cachedJson } from "@/lib/tmdb/cache";
+
+export interface MediaRatings {
+ imdb: number | null;
+ rt: number | null;
+}
+
+interface OmdbResponse {
+ Response?: string;
+ imdbRating?: string;
+ Ratings?: { Source?: string; Value?: string }[];
+}
+
+const NONE: MediaRatings = { imdb: null, rt: null };
+
+const ID_TTL = 2592000; // 30d: a title's IMDb id does not move.
+const SCORE_TTL = 604800; // 7d
+const MISS_TTL = 3600; // a temporarily-absent title retries within the day.
+
+/** OMDb reports "N/A" for anything it lacks; `NaN`/0 have no meaning here. */
+function parseScore(raw: string | undefined): number | null {
+ if (!raw || raw === "N/A") return null;
+ return Number(raw.replace("%", "")) || null;
+}
+
+export async function getRatings(
+ source: MediaSource,
+ ref: { kind: MediaKind; tmdbId: number },
+): Promise<MediaRatings> {
+ const { OMDB_API_KEY: apiKey, VINEXT_KV_CACHE: kv } = env();
+ if (!apiKey || !kv) return NONE;
+
+ try {
+  const imdbId = await cachedJson<string | null>(
+   kv,
+   `omdb:ids:${ref.kind}:${ref.tmdbId}`,
+   ID_TTL,
+   async () => (await source.externalIds(ref.kind, ref.tmdbId)).imdbId,
+  );
+  if (!imdbId) return NONE;
+
+  const scoreKey = `omdb:scores:${imdbId}`;
+  const cached = await kv.get(scoreKey, "json");
+  if (cached !== null && cached !== undefined) return cached as MediaRatings;
+
+  // 20/s keeps a cold grid (~40 titles) under a couple of seconds while
+  // staying orders of magnitude below OMDb's daily cap.
+  await acquire("www.omdbapi.com", 20);
+  const response = await fetch(
+   `https://www.omdbapi.com/?apikey=${encodeURIComponent(apiKey)}&i=${encodeURIComponent(imdbId)}`,
+   { signal: AbortSignal.timeout(2500) },
+  );
+  if (!response.ok) return NONE;
+
+  const wire = (await response.json()) as OmdbResponse;
+  const miss = wire.Response === "False";
+  const scores: MediaRatings = miss
+   ? NONE
+   : {
+    imdb: parseScore(wire.imdbRating),
+    rt: parseScore(
+     (wire.Ratings ?? []).find(
+      (rating) => rating.Source === "Rotten Tomatoes",
+     )?.Value,
+    ),
+   };
+
+  try {
+   await kv.put(scoreKey, JSON.stringify(scores), {
+    expirationTtl: miss ? MISS_TTL : SCORE_TTL,
+   });
+  } catch {
+   // A cache write failing must not fail the request.
+  }
+  return scores;
+ } catch {
+  return NONE;
+ }
+}
+
+export async function getRatingsBatch(
+ source: MediaSource,
+ refs: { kind: MediaKind; tmdbId: number }[],
+): Promise<Map<string, MediaRatings>> {
+ const entries = await Promise.all(
+  refs.map(
+   async (ref) =>
+    [mediaKey(ref), await getRatings(source, ref)] as const,
+  ),
+ );
+ return new Map(entries);
+}

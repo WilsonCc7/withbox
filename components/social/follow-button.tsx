@@ -1,8 +1,16 @@
+"use client";
+
+import { useOptimistic, useTransition } from "react";
+import type { FormEvent } from "react";
 import { follow, unfollow } from "@/lib/social/actions";
 
 /**
- * Plain-form follow control — works with JavaScript disabled.
+ * Follow control — works with JavaScript disabled.
  * The viewer never renders this for their own profile.
+ *
+ * With JavaScript the submit is intercepted: the button flips between Follow
+ * and Following with no round-trip wait, and revalidation reconciles it. Both
+ * branches stay real POST forms carrying the same `userId` field.
  */
 export function FollowButton({
   targetId,
@@ -15,6 +23,21 @@ export function FollowButton({
   isFollowing: boolean;
   signedIn: boolean;
 }) {
+  const [following, setFollowing] = useOptimistic(isFollowing);
+  const [pending, startTransition] = useTransition();
+
+  function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    // The rendered branch decides which way the click goes; `follow` and
+    // `unfollow` are not interchangeable toggles.
+    const next = !following;
+    startTransition(async () => {
+      setFollowing(next);
+      await (next ? follow(formData) : unfollow(formData));
+    });
+  }
+
   if (!signedIn) {
     return (
       <a
@@ -26,13 +49,21 @@ export function FollowButton({
     );
   }
 
-  if (isFollowing) {
+  if (following) {
     return (
-      <form action={unfollow} method="post" className="inline-block">
+      <form
+        action={unfollow}
+        className="inline-block"
+        method="post"
+        onSubmit={onSubmit}
+      >
         <input name="userId" type="hidden" value={targetId} />
         <button
+          aria-busy={pending}
           aria-label={`Unfollow ${targetName}`}
-          className="inline-block rounded-md border border-border px-3 py-1.5 text-sm text-muted transition-colors hover:text-fg"
+          className={`inline-block rounded-md border border-border px-3 py-1.5 text-sm text-muted transition-colors hover:text-fg${
+            pending ? " opacity-60" : ""
+          }`}
           type="submit"
         >
           Following
@@ -42,11 +73,19 @@ export function FollowButton({
   }
 
   return (
-    <form action={follow} method="post" className="inline-block">
+    <form
+      action={follow}
+      className="inline-block"
+      method="post"
+      onSubmit={onSubmit}
+    >
       <input name="userId" type="hidden" value={targetId} />
       <button
+        aria-busy={pending}
         aria-label={`Follow ${targetName}`}
-        className="inline-block rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-bg"
+        className={`inline-block rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-bg${
+          pending ? " opacity-60" : ""
+        }`}
         type="submit"
       >
         Follow

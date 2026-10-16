@@ -36,6 +36,13 @@
       "when": 1792079769466,
       "tag": "0004_simple_red_wolf",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792132655852,
+      "tag": "0005_wild_genesis",
+      "breakpoints": true
     }
   ]
 }

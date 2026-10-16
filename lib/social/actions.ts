@@ -1,6 +1,6 @@
 "use server";
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, gt, lt } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
@@ -212,4 +212,90 @@ export async function removeFromList(formData: FormData): Promise<void> {
   );
 
  await revalidatePaths([`/lists/${listId}`]);
+}
+
+/**
+ * Owner-only. An out-of-range name or description is rejected silently
+ * rather than truncated: the form re-renders with the original text.
+ * `updatedAt` is maintained by the column's `$onUpdate`.
+ */
+export async function renameList(formData: FormData): Promise<void> {
+ const user = await requireUser();
+ const listId = formData.get("listId");
+ if (typeof listId !== "string" || listId === "") return;
+ const name = String(formData.get("name") ?? "").trim();
+ if (name === "" || name.length > 80) return;
+ const description = String(formData.get("description") ?? "").trim();
+ if (description.length > 200) return;
+
+ const db = getDb();
+ const ownerRows = await db
+  .select({ id: list.id })
+  .from(list)
+  .where(and(eq(list.id, listId), eq(list.userId, user.id)))
+  .limit(1);
+ if (ownerRows.length === 0) return;
+
+ await db
+  .update(list)
+  .set({ name, description: description === "" ? null : description })
+  .where(eq(list.id, listId));
+
+ await revalidatePaths(["/lists", `/lists/${listId}`]);
+}
+
+/**
+ * Owner-only reorder: swap positions with the nearest neighbour in the same
+ * direction. The two updates go through one `db.batch` for atomicity — there
+ * is no unique index on `(listId, position)`, so a half-applied swap would
+ * just be a wrong order, not a constraint error.
+ */
+export async function moveListItem(formData: FormData): Promise<void> {
+ const user = await requireUser();
+ const itemId = formData.get("itemId");
+ if (typeof itemId !== "string" || itemId === "") return;
+ const direction = formData.get("direction");
+ if (direction !== "up" && direction !== "down") return;
+
+ const db = getDb();
+ // The join both proves ownership and yields the row's position, so this
+ // costs one statement rather than a separate owner check.
+ const currentRows = await db
+  .select({ listId: listItem.listId, position: listItem.position })
+  .from(listItem)
+  .innerJoin(list, eq(listItem.listId, list.id))
+  .where(and(eq(listItem.id, itemId), eq(list.userId, user.id)))
+  .limit(1);
+ if (currentRows.length === 0) return;
+ const current = currentRows[0];
+
+ const up = direction === "up";
+ const neighbourRows = await db
+  .select({ id: listItem.id, position: listItem.position })
+  .from(listItem)
+  .where(
+   and(
+    eq(listItem.listId, current.listId),
+    up
+     ? lt(listItem.position, current.position)
+     : gt(listItem.position, current.position),
+   ),
+  )
+  .orderBy(up ? desc(listItem.position) : asc(listItem.position))
+  .limit(1);
+ const neighbour = neighbourRows[0];
+ if (!neighbour) return;
+
+ await db.batch([
+  db
+   .update(listItem)
+   .set({ position: neighbour.position })
+   .where(eq(listItem.id, itemId)),
+  db
+   .update(listItem)
+   .set({ position: current.position })
+   .where(eq(listItem.id, neighbour.id)),
+ ]);
+
+ await revalidatePaths([`/lists/${current.listId}`]);
 }

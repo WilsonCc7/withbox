@@ -1,15 +1,34 @@
 import { PosterGrid } from "@/components/poster-grid";
 import { SiteHeader } from "@/components/site-header";
+import { getCardStates } from "@/lib/library/queries";
 import { mediaSource } from "@/lib/media/runtime";
+import { getRatingsBatch } from "@/lib/ratings";
+import { currentUser } from "@/lib/session";
 
 export default async function SearchPage({
   searchParams,
 }: {
   searchParams: Promise<{ q?: string }>;
 }) {
+  const user = await currentUser();
   const { q } = await searchParams;
   const query = (q ?? "").trim();
   const results = query ? await mediaSource().search(query, "multi") : null;
+
+  // getCardStates is two indexed D1 reads; getRatingsBatch is
+  // KV-cached and rate-limited — a cold cache costs one OMDb
+  // call per title (up to 8 suggestions' worth on a full page).
+  // Signed-out searches skip both.
+  const [cardStates, ratings] = results
+    ? await Promise.all([
+        user ? getCardStates(user.id, results.items) : Promise.resolve(new Map()),
+        user
+          ? getRatingsBatch(mediaSource(), results.items)
+          : Promise.resolve(new Map<string, never>()),
+      ])
+    : [new Map(), new Map<string, never>()];
+
+  const overlays = user ? { ratings, states: cardStates } : undefined;
 
   return (
     <>
@@ -36,7 +55,11 @@ export default async function SearchPage({
               {results.totalResults} result{results.totalResults === 1 ? "" : "s"}{" "}
               for <span className="text-fg">{query}</span>
             </h1>
-            <PosterGrid items={results.items} />
+            <PosterGrid
+              items={results.items}
+              ratings={overlays?.ratings}
+              states={overlays?.states}
+            />
           </>
         )}
       </main>

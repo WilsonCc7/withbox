@@ -5,13 +5,13 @@ import { env } from "./env";
  * The authenticated user, as far as this app cares.
  */
 export interface AuthUser {
-  id: string;
-  email: string;
-  name?: string | null;
+ id: string;
+ email: string;
+ name?: string | null;
 }
 
 export interface AuthSession {
-  user: AuthUser;
+ user: AuthUser;
 }
 
 /**
@@ -21,10 +21,10 @@ export interface AuthSession {
  * the app does not couple to Better Auth's generic parameter shape.
  */
 export interface AuthInstance {
-  handler(request: Request): Promise<Response>;
-  api: {
-    getSession(input: { headers: Headers }): Promise<AuthSession | null>;
-  };
+ handler(request: Request): Promise<Response>;
+ api: {
+  getSession(input: { headers: Headers }): Promise<AuthSession | null>;
+ };
 }
 
 let cached: AuthInstance | undefined;
@@ -49,14 +49,21 @@ let cached: AuthInstance | undefined;
  * in `drizzle/`.
  */
 export function getAuth(): AuthInstance {
-  if (!cached) {
-    const { DB, BETTER_AUTH_URL, BETTER_AUTH_SECRET } = env();
-    cached = betterAuth({
-      baseURL: BETTER_AUTH_URL,
-      secret: BETTER_AUTH_SECRET,
-      emailAndPassword: { enabled: true },
-      database: DB,
-    });
-  }
-  return cached;
+ if (!cached) {
+  const { DB, BETTER_AUTH_URL, BETTER_AUTH_SECRET } = env();
+  cached = betterAuth({
+   baseURL: BETTER_AUTH_URL,
+   secret: BETTER_AUTH_SECRET,
+   emailAndPassword: { enabled: true },
+   database: DB,
+   // Columns Better Auth does not know about must be declared, or its
+   // adapter drops them. `bio` also exists in `db/schema.ts`.
+   user: {
+    additionalFields: {
+     bio: { type: "string", required: false },
+    },
+   },
+  });
+ }
+ return cached;
 }

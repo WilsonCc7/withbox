@@ -1,6 +1,10 @@
 import { SiteHeader } from "@/components/site-header";
 import { CreateListForm } from "@/components/social/create-list-form";
+import { mediaKey } from "@/lib/library/types";
+import type { MediaRef } from "@/lib/library/types";
+import { imageUrl } from "@/lib/media/images";
 import { getListsByUser } from "@/lib/social/queries";
+import { mediaSource } from "@/lib/media/runtime";
 import { currentUser } from "@/lib/session";
 
 export default async function ListsPage() {
@@ -24,6 +28,35 @@ export default async function ListsPage() {
 
   const lists = await getListsByUser(user.id);
 
+  // Cover thumbs: resolve every list's first item in one
+  // mediaSource() batch over the distinct refs (lists can
+  // share a cover title), not one call per card.
+  const seen = new Set<string>();
+  const distinctRefs: MediaRef[] = [];
+  for (const list of lists) {
+    const ref = list.firstItem;
+    if (!ref) continue;
+    const key = mediaKey(ref);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    distinctRefs.push(ref);
+  }
+  const source = mediaSource();
+  const covers = new Map(
+    (
+      await Promise.all(
+        distinctRefs.map(async (ref) =>
+          [
+            mediaKey(ref),
+            ref.kind === "movie"
+              ? await source.movie(ref.tmdbId)
+              : await source.tv(ref.tmdbId),
+          ] as const,
+        ),
+      )
+    ).filter(([, detail]) => detail !== null),
+  );
+
   return (
     <>
       <SiteHeader />
@@ -42,24 +75,52 @@ export default async function ListsPage() {
           </div>
         ) : (
           <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {lists.map((list) => (
-              <li key={list.id}>
-                <a
-                  className="flex h-full flex-col gap-1 rounded-[var(--radius-card)] border border-border bg-surface p-4 transition-colors hover:border-faint"
-                  href={`/lists/${list.id}`}
-                >
-                  <span className="text-fg font-semibold">{list.name}</span>
-                  {list.description !== null && (
-                    <span className="truncate text-sm text-muted">
-                      {list.description}
-                    </span>
-                  )}
-                  <span className="mt-2 text-xs text-faint">
-                    {list.itemCount} title{list.itemCount === 1 ? "" : "s"}
-                  </span>
-                </a>
-              </li>
-            ))}
+            {lists.map((list) => {
+              const cover = list.firstItem
+                ? covers.get(mediaKey(list.firstItem)) ?? null
+                : null;
+              const href = list.firstItem
+                ? `/${list.firstItem.kind}/${list.firstItem.tmdbId}`
+                : null;
+              return (
+                <li key={list.id}>
+                  <div className="flex h-full gap-3">
+                    {href && (
+                      <a
+                        aria-label={cover?.title ?? "First item"}
+                        className="shrink-0 self-start"
+                        href={href}
+                      >
+                        {cover?.posterPath ? (
+                          <img
+                            alt={cover.title}
+                            className="w-14 rounded-[var(--radius-card)]"
+                            loading="lazy"
+                            src={imageUrl(cover.posterPath, "w92") ?? undefined}
+                          />
+                        ) : (
+                          <span className="block h-20 w-14 rounded-[var(--radius-card)] bg-surface-hi" />
+                        )}
+                      </a>
+                    )}
+                    <a
+                      className="flex h-full min-w-0 flex-1 flex-col gap-1 rounded-[var(--radius-card)] border border-border bg-surface p-4 transition-colors hover:border-faint"
+                      href={`/lists/${list.id}`}
+                    >
+                      <span className="text-fg font-semibold">{list.name}</span>
+                      {list.description !== null && (
+                        <span className="truncate text-sm text-muted">
+                          {list.description}
+                        </span>
+                      )}
+                      <span className="mt-2 text-xs text-faint">
+                        {list.itemCount} title{list.itemCount === 1 ? "" : "s"}
+                      </span>
+                    </a>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )}
       </main>

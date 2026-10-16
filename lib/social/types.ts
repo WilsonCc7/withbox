@@ -1,3 +1,4 @@
+import type { MediaKind } from "@/lib/media/types";
 import type { MediaRef } from "@/lib/library/types";
 
 export interface UserSummary {
@@ -12,6 +13,8 @@ export interface ListSummary {
  owner: UserSummary;
  itemCount: number;
  updatedAt: Date;
+ /** Cover thumb: the item at the list's minimum position; null when empty. */
+ firstItem: MediaRef | null;
 }
 
 /**
@@ -35,6 +38,7 @@ export type ActivityItem =
   media: MediaRef;
   season: number | null;
   episode: number | null;
+  rewatch: boolean;
  })
  | (ActivityItemBase & {
   type: "rating";
@@ -46,6 +50,10 @@ export type ActivityItem =
   media: MediaRef;
   body: string;
   containsSpoilers: boolean;
+ })
+ | (ActivityItemBase & {
+  type: "liked";
+  media: MediaRef;
  })
  | (ActivityItemBase & {
   type: "listed";
@@ -67,4 +75,32 @@ export interface ActivityPage {
  items: ActivityItem[];
  /** `null` when this is the last page. */
  next: ActivityCursor | null;
+}
+
+/** One review with the author's title-level score, or null when unrated. */
+export interface ReviewWithRef {
+ kind: MediaKind;
+ tmdbId: number;
+ value: number | null;
+ body: string;
+ containsSpoilers: boolean;
+ updatedAt: Date;
+}
+
+/**
+ * Feed cursor wire format: `<epochMillis>-<rowId>`. Split on the FIRST
+ * hyphen only — row ids are UUIDs and contain hyphens of their own, so a
+ * plain split would tear them apart. Anything malformed means "first
+ * page", never an error.
+ */
+export function parseActivityCursor(
+ raw: string | null | undefined,
+): { at: number; id: string } | null {
+ if (raw === null || raw === undefined) return null;
+ const split = raw.indexOf("-");
+ if (split <= 0) return null;
+ const at = Number.parseInt(raw.slice(0, split), 10);
+ const id = raw.slice(split + 1);
+ if (!Number.isFinite(at) || at < 0 || id === "") return null;
+ return { at, id };
 }

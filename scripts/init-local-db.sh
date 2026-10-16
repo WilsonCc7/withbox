@@ -70,7 +70,9 @@ for i, (path, sql) in enumerate(stmts, 1):
     if ok:
         applied += 1
         continue
-    if "already exists" in err:
+    # `ALTER TABLE ... ADD COLUMN` is idempotent-in-spirit too: a re-run on an
+    # existing local database must not hard-fail (the DDL has no IF NOT EXISTS).
+    if "already exists" in err or "duplicate column name" in err:
         skipped += 1
         continue
     print(f"migration failed in {path} (statement {i}): {err[:400]}", file=sys.stderr)

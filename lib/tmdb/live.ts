@@ -3,10 +3,16 @@
  *
  * Talks to `https://api.themoviedb.org/3` with an API-key bearer
  * token. The key is passed in — this module never reads the
- * environment. A 404 resolves to `null` (missing title); any other
- * non-2xx throws a `TmdbHttpError` carrying the status.
+ * environment.
+ *
+ * Every request funnels through one `get()`: rate-limited, then
+ * read through a KV cache when one is supplied. Only 2xx bodies
+ * are cached; a 404 resolves to `null` and is deliberately left
+ * uncached so a missing id keeps costing exactly one call. Any
+ * other non-2xx throws a `TmdbHttpError` carrying the status.
  */
 import type {
+  Credits,
   Episode,
   MediaKind,
   MediaSummary,
@@ -17,6 +23,8 @@ import type {
   TrendingWindow,
   TvDetail,
 } from "@/lib/media/types";
+import { acquire } from "@/lib/rate-limit";
+import { cacheKey, cachedJson } from "./cache";
 import * as map from "./map";
 
 const API_BASE = "https://api.themoviedb.org/3";
@@ -32,22 +40,43 @@ export class TmdbHttpError extends Error {
   }
 }
 
-export function createLiveSource(apiKey: string): MediaSource {
+/** How long a response of this shape stays fresh. */
+function ttlFor(path: string): number {
+  if (path.startsWith("trending/")) return 3600;
+  if (path.startsWith("search/")) return 600;
+  if (path.endsWith("/external_ids")) return 604800;
+  return 86400;
+}
+
+export function createLiveSource(
+  apiKey: string,
+  deps?: { kv?: KVNamespace },
+): MediaSource {
+  const kv = deps?.kv;
+
   async function get<T>(
     path: string,
     params?: URLSearchParams,
   ): Promise<T | null> {
-    const url = new URL(`${API_BASE}/${path}`);
-    if (params) url.search = params.toString();
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: "application/json",
+    return cachedJson<T | null>(
+      kv,
+      cacheKey(path, params),
+      ttlFor(path),
+      async () => {
+        await acquire("api.themoviedb.org", 20);
+        const url = new URL(`${API_BASE}/${path}`);
+        if (params) url.search = params.toString();
+        const response = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            Accept: "application/json",
+          },
+        });
+        if (response.status === 404) return null;
+        if (!response.ok) throw new TmdbHttpError(response.status, path);
+        return (await response.json()) as T;
       },
-    });
-    if (response.status === 404) return null;
-    if (!response.ok) throw new TmdbHttpError(response.status, path);
-    return (await response.json()) as T;
+    );
   }
 
   return {
@@ -109,6 +138,21 @@ export function createLiveSource(apiKey: string): MediaSource {
         `tv/${tvId}/season/${seasonNumber}`,
       );
       return (wire?.episodes ?? []).map(map.mapEpisode);
+    },
+
+    async externalIds(
+      kind: MediaKind,
+      tmdbId: number,
+    ): Promise<{ imdbId: string | null }> {
+      const wire = await get<map.WireExternalIds>(
+        `${kind}/${tmdbId}/external_ids`,
+      );
+      return map.mapExternalIds(wire);
+    },
+
+    async credits(kind: MediaKind, tmdbId: number): Promise<Credits> {
+      const wire = await get<map.WireCredits>(`${kind}/${tmdbId}/credits`);
+      return map.mapCredits(kind, wire);
     },
   };
 }

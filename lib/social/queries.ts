@@ -17,6 +17,7 @@ import {
  follow,
  list,
  listItem,
+ mediaLike,
  rating,
  review,
  user,
@@ -27,9 +28,15 @@ import type {
  ActivityItem,
  ActivityPage,
  ListSummary,
+ ReviewWithRef,
  UserSummary,
 } from "./types";
 import type { MediaRef } from "@/lib/library/types";
+import type { MediaKind } from "@/lib/media/types";
+
+// Co-located with the query that returns it: the profile/reviews pages import
+// `getReviewsByUser` from here, so the type it returns lives here too.
+export type { ReviewWithRef };
 
 /**
  * Keyset predicate for a `(timestamp, id)` cursor: strictly older rows, with
@@ -119,12 +126,12 @@ export async function getFollowing(
 
 /**
  * The derived activity feed: the viewer plus everyone they follow,
- * merged from four sources in at most five queries (one to resolve
+ * merged from five sources in at most six queries (one to resolve
  * the follow scope, one per source — never per followed user).
  *
  * Timestamps come from each source row: `watchedAt` for watch
  * entries, `updatedAt` for ratings and reviews (the latest
- * meaningful edit), `createdAt` for lists.
+ * meaningful edit), `createdAt` for lists and likes.
  */
 export async function getActivity(
  viewerId: string,
@@ -141,7 +148,7 @@ export async function getActivity(
   .where(eq(follow.followerId, viewerId));
  const scope = [viewerId, ...followed.map((row) => row.followingId)];
 
- const [watches, ratings, reviews, lists] = await Promise.all([
+ const [watches, ratings, reviews, lists, likes] = await Promise.all([
   // Films (season IS NULL) and episode rows (episode IS NOT NULL).
   // By design there are no show/season-level rows, so this OR
   // admits every legitimate watch row and nothing else.
@@ -155,6 +162,7 @@ export async function getActivity(
     tmdbId: watchEntry.tmdbId,
     season: watchEntry.season,
     episode: watchEntry.episode,
+    rewatch: watchEntry.rewatch,
    })
    .from(watchEntry)
    .innerJoin(user, eq(watchEntry.userId, user.id))
@@ -226,6 +234,25 @@ export async function getActivity(
    )
    .orderBy(desc(list.createdAt), desc(list.id))
    .limit(fetchLimit),
+  getDb()
+   .select({
+    id: mediaLike.id,
+    userId: mediaLike.userId,
+    userName: user.name,
+    at: mediaLike.createdAt,
+    kind: mediaLike.kind,
+    tmdbId: mediaLike.tmdbId,
+   })
+   .from(mediaLike)
+   .innerJoin(user, eq(mediaLike.userId, user.id))
+   .where(
+    and(
+     inArray(mediaLike.userId, scope),
+     before ? olderThan(mediaLike.createdAt, mediaLike.id, before) : undefined,
+    ),
+   )
+   .orderBy(desc(mediaLike.createdAt), desc(mediaLike.id))
+   .limit(fetchLimit),
  ]);
 
  const items: ActivityItem[] = [
@@ -237,6 +264,7 @@ export async function getActivity(
    media: { kind: row.kind, tmdbId: row.tmdbId } satisfies MediaRef,
    season: row.season,
    episode: row.episode,
+   rewatch: row.rewatch,
   })),
   ...ratings.map((row) => ({
    id: row.id,
@@ -262,6 +290,13 @@ export async function getActivity(
    at: row.at,
    listId: row.id,
    listName: row.name,
+  })),
+  ...likes.map((row) => ({
+   id: row.id,
+   type: "liked" as const,
+   user: { id: row.userId, name: row.userName },
+   at: row.at,
+   media: { kind: row.kind, tmdbId: row.tmdbId } satisfies MediaRef,
   })),
  ];
 
@@ -305,6 +340,38 @@ export async function getListsByUser(
   .where(eq(list.userId, userId))
   .groupBy(list.id)
   .orderBy(desc(list.updatedAt));
+
+ // One statement for the whole page: the cover thumb of each list is the
+ // item at that list's minimum position.
+ const listIds = rows.map((row) => row.id);
+ const firstItems: { listId: string; kind: MediaKind; tmdbId: number }[] =
+  listIds.length === 0
+   ? []
+   : await getDb()
+    .select({
+     listId: listItem.listId,
+     kind: listItem.kind,
+     tmdbId: listItem.tmdbId,
+    })
+    .from(listItem)
+    .where(
+     and(
+      inArray(listItem.listId, listIds),
+      sql`${listItem.position} = (select min(i2.position) from list_item i2 where i2.listId = ${listItem.listId})`,
+     ),
+    )
+    // Two items can share the minimum position; the id makes the pick
+    // stable across loads instead of whatever the planner returns.
+    .orderBy(listItem.id);
+ const firstByList = Object.fromEntries(
+  firstItems.map(
+   (item): [string, MediaRef] => [
+    item.listId,
+    { kind: item.kind, tmdbId: item.tmdbId },
+   ],
+  ),
+ );
+
  return rows.map((row) => ({
   id: row.id,
   name: row.name,
@@ -312,12 +379,17 @@ export async function getListsByUser(
   owner: { id: row.ownerId, name: row.ownerName },
   itemCount: row.itemCount,
   updatedAt: row.updatedAt,
+  firstItem: firstByList[row.id] ?? null,
  }));
 }
 
+/**
+ * The item rows keep their own `id` alongside the media ref: the reorder and
+ * remove controls key off `list_item.id`, and only this query has it.
+ */
 export async function getListById(
  listId: string,
-): Promise<(ListSummary & { items: MediaRef[] }) | null> {
+): Promise<(ListSummary & { items: (MediaRef & { id: string })[] }) | null> {
  const rows = await getDb()
   .select({
    id: list.id,
@@ -334,22 +406,28 @@ export async function getListById(
  if (rows.length === 0) return null;
 
  const items = await getDb()
-  .select({ kind: listItem.kind, tmdbId: listItem.tmdbId })
+  .select({
+   id: listItem.id,
+   kind: listItem.kind,
+   tmdbId: listItem.tmdbId,
+  })
   .from(listItem)
   .where(eq(listItem.listId, listId))
   .orderBy(listItem.position);
 
+ const refs = items.map(
+  (item) => ({ id: item.id, kind: item.kind, tmdbId: item.tmdbId }),
+ );
  const row = rows[0];
  return {
   id: row.id,
   name: row.name,
   description: row.description,
   owner: { id: row.ownerId, name: row.ownerName },
-  itemCount: items.length,
+  itemCount: refs.length,
   updatedAt: row.updatedAt,
-  items: items.map(
-   (item) => ({ kind: item.kind, tmdbId: item.tmdbId }) satisfies MediaRef,
-  ),
+  firstItem: refs[0] ?? null,
+  items: refs,
  };
 }
 
@@ -390,5 +468,44 @@ export async function listUsers(
  return {
   users: rows.slice(0, limit).map((row) => ({ id: row.id, name: row.name })),
   hasMore: rows.length > limit,
+ };
+}
+
+/**
+ * A user's reviews, newest edit first, each carrying the title-level score.
+ * LEFT JOIN, not inner: a review can exist with no rating, and its `value`
+ * must read as null rather than dropping the row. Offset-paginated like
+ * `listUsers` — `updatedAt` is editable, so a keyset cursor on it would slide.
+ */
+export async function getReviewsByUser(
+ userId: string,
+ opts: { limit: number; offset: number },
+): Promise<{ items: ReviewWithRef[]; hasMore: boolean }> {
+ const rows = await getDb()
+  .select({
+   kind: review.kind,
+   tmdbId: review.tmdbId,
+   value: rating.value,
+   body: review.body,
+   containsSpoilers: review.containsSpoilers,
+   updatedAt: review.updatedAt,
+  })
+  .from(review)
+  .leftJoin(
+   rating,
+   and(
+    eq(rating.userId, review.userId),
+    eq(rating.kind, review.kind),
+    eq(rating.tmdbId, review.tmdbId),
+   ),
+  )
+  .where(eq(review.userId, userId))
+  .orderBy(desc(review.updatedAt), desc(review.id))
+  .limit(opts.limit + 1)
+  .offset(opts.offset);
+ // The extra row is the proof of a further page; it is not returned.
+ return {
+  items: rows.slice(0, opts.limit),
+  hasMore: rows.length > opts.limit,
  };
 }

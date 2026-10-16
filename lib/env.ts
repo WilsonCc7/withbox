@@ -17,13 +17,19 @@ import { env as workerEnv } from "cloudflare:workers";
  * runtime (tests, scripts).
  */
 export interface Env {
-  DB: D1Database;
-  BETTER_AUTH_SECRET?: string;
-  BETTER_AUTH_URL?: string;
-  TMDB_MODE?: string;
-  TMDB_API_KEY?: string;
+ DB: D1Database;
+ BETTER_AUTH_SECRET?: string;
+ BETTER_AUTH_URL?: string;
+ TMDB_MODE?: string;
+ TMDB_API_KEY?: string;
+ /** Response cache for TMDB/OMDb. Optional: scripts and tests have none. */
+ VINEXT_KV_CACHE?: KVNamespace;
+ /** Avatar bucket. Optional for the same reason. */
+ AVATARS?: R2Bucket;
+ /** OMDb key for IMDb/Rotten Tomatoes scores. Absent => TMDB fallback only. */
+ OMDB_API_KEY?: string;
 }
 
 export function env(): Env {
-  return (workerEnv ?? process.env) as unknown as Env;
+ return (workerEnv ?? process.env) as unknown as Env;
 }

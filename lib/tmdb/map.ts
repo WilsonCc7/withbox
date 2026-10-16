@@ -1,13 +1,15 @@
 /**
  * TMDB wire JSON -> domain types.
  *
- * TMDB is inconsistent between endpoints: movies use `title` /
- * `release_date` / `runtime`, TV uses `name` / `first_air_date` /
- * `episode_run_time`, and `vote_average` can be absent on either.
- * Everything is normalised here so nothing downstream ever sees a
- * wire field name.
+ * Field names stay TMDB's so the boundary is explicit; nothing
+ * outside `lib/tmdb/` reads them. Every field is optional —
+ * TMDB omits them unpredictably.
  */
 import type {
+  CastMember,
+  CreatedBy,
+  Credits,
+  CrewMember,
   Episode,
   Genre,
   MediaKind,
@@ -59,6 +61,39 @@ export interface WireTvDetail extends WireMediaSummary {
   status?: string;
   genres?: WireGenre[];
   seasons?: WireSeason[];
+  created_by?: WireCreatedBy[];
+}
+
+export interface WireCreatedBy {
+  id: number;
+  name: string;
+  profile_path?: string | null;
+}
+
+/** `external_ids` response. */
+export interface WireExternalIds {
+  imdb_id?: string | null;
+}
+
+export interface WireCastMember {
+  id: number;
+  name: string;
+  character?: string;
+  profile_path?: string | null;
+  order?: number;
+}
+
+export interface WireCrewMember {
+  id: number;
+  name: string;
+  job?: string;
+  profile_path?: string | null;
+}
+
+/** `movie/{id}/credits` and `tv/{id}/credits` response. */
+export interface WireCredits {
+  cast?: WireCastMember[];
+  crew?: WireCrewMember[];
 }
 
 export interface WireEpisode {
@@ -130,6 +165,13 @@ export function mapTvDetail(wire: WireTvDetail): TvDetail {
     status: wire.status ?? "",
     genres: mapGenres(wire.genres),
     seasons: (wire.seasons ?? []).map(mapSeason),
+    createdBy: (wire.created_by ?? []).map(
+      (person): CreatedBy => ({
+        tmdbId: person.id,
+        name: person.name,
+        profilePath: person.profile_path ?? null,
+      }),
+    ),
   };
 }
 
@@ -153,6 +195,47 @@ export function mapEpisode(wire: WireEpisode): Episode {
     airDate: wire.air_date ?? null,
     stillPath: wire.still_path ?? null,
   };
+}
+
+/** `""` and missing ids both mean "no IMDb id". */
+export function mapExternalIds(
+  wire: WireExternalIds | null | undefined,
+): { imdbId: string | null } {
+  return { imdbId: wire?.imdb_id ? wire.imdb_id : null };
+}
+
+const MOVIE_CREW_JOBS = ["Director"];
+const TV_CREW_JOBS = ["Writer", "Screenplay", "Creator"];
+
+/** Cast by billing order (max 20); crew reduced to the roles worth showing. */
+export function mapCredits(
+  kind: MediaKind,
+  wire: WireCredits | null | undefined,
+): Credits {
+  const cast: CastMember[] = (wire?.cast ?? [])
+    .slice()
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .slice(0, 20)
+    .map((person) => ({
+      tmdbId: person.id,
+      name: person.name,
+      character: person.character ? person.character : null,
+      profilePath: person.profile_path ?? null,
+    }));
+
+  const jobs = new Set(kind === "movie" ? MOVIE_CREW_JOBS : TV_CREW_JOBS);
+  const seen = new Set<string>();
+  const crew: CrewMember[] = [];
+  for (const person of wire?.crew ?? []) {
+    const job = person.job ?? "";
+    const key = `${person.id}:${job}`;
+    if (!jobs.has(job) || seen.has(key)) continue;
+    seen.add(key);
+    crew.push({ tmdbId: person.id, name: person.name, job });
+    if (crew.length === 8) break;
+  }
+
+  return { cast, crew };
 }
 
 /**

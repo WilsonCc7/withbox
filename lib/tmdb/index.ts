@@ -12,11 +12,12 @@ import { createLiveSource } from "./live";
 export interface TmdbEnv {
   TMDB_MODE?: string;
   TMDB_API_KEY?: string;
+  VINEXT_KV_CACHE?: KVNamespace;
 }
 
 export function getMediaSource(env: TmdbEnv): MediaSource {
   if (env.TMDB_MODE === "fixture" || !env.TMDB_API_KEY) {
     return createFixtureSource();
   }
-  return createLiveSource(env.TMDB_API_KEY);
+  return createLiveSource(env.TMDB_API_KEY, { kv: env.VINEXT_KV_CACHE });
 }

@@ -1,5 +1,6 @@
 import { PlayerFrame } from "@/components/player/player-frame";
 import { PlayerProgressBridge } from "@/components/player/player-progress-bridge";
+import { SourcePicker } from "@/components/player/source-picker";
 import { SiteHeader } from "@/components/site-header";
 import { getProgress } from "@/lib/library/queries";
 import { markWatched, saveProgress } from "@/lib/library/actions";
@@ -172,32 +173,23 @@ export default async function WatchPage({
        />
       )}
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-faint">
-       <span>Source:</span>
-       {options.map((option) =>
-        // Highlight the adapter that is ACTUALLY playing, not the one
-        // requested — otherwise a fallback would show a source as
-        // selected while a different one plays.
-        option.adapter.name === resolved.adapter.name ? (
-         <span className="font-medium text-fg" key={option.adapter.name}>
-          {option.adapter.label}
-         </span>
-        ) : (
-         <a
-          className="text-muted hover:text-accent"
-          href={sourceHref(option.adapter.name)}
-          key={option.adapter.name}
-         >
-          {option.adapter.label}
-         </a>
-        ),
-       )}
-       {resuming && resumeSeconds !== undefined && (
-        <span className="text-faint">
-         resuming from {formatPosition(resumeSeconds)}
-        </span>
-       )}
-      </div>
+      <SourcePicker
+        initialSource={query.source ?? null}
+        options={options.map((option) => ({
+          name: option.adapter.name,
+          label: option.adapter.label,
+          href: sourceHref(option.adapter.name),
+          progress:
+            option.resolution.kind === "iframe" && option.resolution.progress,
+        }))}
+        resolvedName={resolved.adapter.name}
+      >
+        {resuming && resumeSeconds !== undefined && (
+          <span className="text-faint">
+            resuming from {formatPosition(resumeSeconds)}
+          </span>
+        )}
+      </SourcePicker>
       <p className="mt-1 text-xs text-faint">
        {resolved.resolution.kind === "iframe" && !resolved.resolution.progress && (
         <>this source cannot report playback position, so mark it watched yourself</>

@@ -1,13 +1,14 @@
 import type { MediaKind } from "@/lib/media/types";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
-import { unionAll } from "drizzle-orm/sqlite-core";
 import { getDb } from "@/lib/db";
 import {
-  playbackProgress,
-  rating,
-  review,
-  watchEntry,
-  watchlistItem,
+ favorite,
+ mediaLike,
+ playbackProgress,
+ rating,
+ review,
+ watchEntry,
+ watchlistItem,
 } from "@/db/schema";
 import type { EpisodeMark, MediaRef, WatchState } from "./types";
 import { mediaKey, progressSlot } from "./types";
@@ -18,6 +19,35 @@ const EMPTY_WATCH_STATE: WatchState = {
  rating: null,
  review: null,
 };
+
+/**
+ * Every multi-ref lookup is chunked.
+ *
+ * Two runtime limits force it: D1 caps bound parameters at 100 per statement,
+ * and the SQLite in the local runtime caps a compound SELECT at five terms —
+ * so expanding N refs into a VALUES-style CTE (the obvious way to ask for the
+ * state of "these titles") fails as soon as a page grids more than five
+ * posters. Chunking keeps every statement small. Because each row carries its
+ * own kind/tmdbId, a coarse `IN` filter can only over-read rows the caller then
+ * ignores by key.
+ */
+const REF_CHUNK = 60;
+
+function chunkRefs(refs: MediaRef[]): MediaRef[][] {
+ const chunks: MediaRef[][] = [];
+ for (let i = 0; i < refs.length; i += REF_CHUNK) {
+  chunks.push(refs.slice(i, i + REF_CHUNK));
+ }
+ return chunks;
+}
+
+/** `IN` values for one chunk: kinds collapse to the one or two present. */
+function refFilter(chunk: MediaRef[]): { kinds: MediaKind[]; tmdbIds: number[] } {
+ return {
+  kinds: [...new Set(chunk.map((ref) => ref.kind))],
+  tmdbIds: chunk.map((ref) => ref.tmdbId),
+ };
+}
 
 /**
  * Reads only. Everything takes `userId` explicitly — the session is
@@ -34,40 +64,18 @@ export async function getWatchState(
 }
 
 /**
- * One query for N refs, not N queries.
+ * Watch state for N refs, in a bounded number of statements.
  *
- * A single statement: the requested (kind, tmdbId) pairs become a CTE
- * (UNION ALL of one-row selects — drizzle's way to build a VALUES
- * list), LEFT JOINed against three subqueries scoped to this user and
- * these keys: latest watch time per key (MAX + GROUP BY), rating,
- * review. The database touches only this user's rows for the requested
- * keys.
+ * Three lookups, each chunked over the ref list: the newest watch row per key
+ * (MAX + GROUP BY), the user's rating, the user's review. They stay separate
+ * statements rather than one join because a title can be rated before it is
+ * watched — a join driven from `watch_entry` drops that case, and one driven
+ * from a requested-keys CTE cannot be expressed within the runtime's
+ * compound-SELECT limit (see `REF_CHUNK`).
  *
- * Starting from the requested-keys CTE rather than from watch_entry
- * means a rating or review with no watch row yet (rate-before-watch)
- * is still returned.
- *
- *   WITH requested(kind, tmdbId) AS (
- *     SELECT ? AS "kind", ? AS "tmdbId"
- *     UNION ALL SELECT ?, ?
- *     UNION ALL ...
- *   )
- *   SELECT requested.kind, requested.tmdbId, latest.watchedAt,
- *          rating.value, review.body, review.containsSpoilers
- *   FROM requested
- *   LEFT JOIN (SELECT kind, tmdbId, MAX(watchedAt) AS watchedAt
- *              FROM watch_entry
- *              WHERE userId = ? AND kind IN ? AND tmdbId IN ?
- *              GROUP BY kind, tmdbId) latest
- *     ON latest.kind = requested.kind AND latest.tmdbId = requested.tmdbId
- *   LEFT JOIN rating  ON rating.userId = ? AND rating.kind = requested.kind
- *                     AND rating.tmdbId = requested.tmdbId
- *   LEFT JOIN review  ON review.userId = ? AND review.kind = requested.kind
- *                     AND review.tmdbId = requested.tmdbId
- *
- * `MAX(watchedAt)` is a raw sql fragment, so drizzle's timestamp_ms
- * column mapping does not apply — it arrives as integer milliseconds
- * and is converted to Date below.
+ * `MAX(watchedAt)` is a raw sql fragment, so drizzle's timestamp_ms column
+ * mapping does not apply — it arrives as integer milliseconds and is converted
+ * to Date below.
  */
 export async function getWatchStates(
  userId: string,
@@ -79,111 +87,92 @@ export async function getWatchStates(
  if (refs.length === 0) return states;
 
  const db = getDb();
- const kinds = refs.map((ref) => ref.kind);
- const tmdbIds = refs.map((ref) => ref.tmdbId);
+ const chunks = chunkRefs(refs);
 
- // One-row-per-ref selects unioned into a VALUES-style CTE. Drizzle has no
- // VALUES-list builder, and a unioned query no longer satisfies
- // TypedQueryBuilder (set operators exclude further methods), so the CTE is
- // built from raw SQL with an explicit selection — the typed escape hatch for
- // exactly this.
- //
- // No FROM clause: `SELECT <literal> AS "kind", <literal> AS "tmdbId"` yields
- // exactly one row per ref. An earlier version appended
- // `FROM "watch_entry" WHERE false` (drizzle's idiom for a typed empty select)
- // which is not a no-op once written literally — it emptied the CTE, so the
- // outer join matched nothing and every title silently read as unwatched.
- const requested = db.$with(
-  "requested",
-  { kind: sql<MediaKind>, tmdbId: sql<number> },
- ).as(
-  sql.raw(
-   refs
-    .map(
-     (ref) =>
-      `SELECT ${JSON.stringify(ref.kind)} AS "kind", ${ref.tmdbId} AS "tmdbId"`,
-    )
-    .join(" UNION ALL "),
+ const [watchPages, ratingPages, reviewPages] = await Promise.all([
+  Promise.all(
+   chunks.map((chunk) => {
+    const { kinds, tmdbIds } = refFilter(chunk);
+    return db
+     .select({
+      kind: watchEntry.kind,
+      tmdbId: watchEntry.tmdbId,
+      watchedAt: sql<number>`MAX(${watchEntry.watchedAt})`.as("watchedAt"),
+     })
+     .from(watchEntry)
+     .where(
+      and(
+       eq(watchEntry.userId, userId),
+       inArray(watchEntry.kind, kinds),
+       inArray(watchEntry.tmdbId, tmdbIds),
+      ),
+     )
+     .groupBy(watchEntry.kind, watchEntry.tmdbId);
+   }),
   ),
- );
+  Promise.all(
+   chunks.map((chunk) => {
+    const { kinds, tmdbIds } = refFilter(chunk);
+    return db
+     .select({
+      kind: rating.kind,
+      tmdbId: rating.tmdbId,
+      value: rating.value,
+     })
+     .from(rating)
+     .where(
+      and(
+       eq(rating.userId, userId),
+       inArray(rating.kind, kinds),
+       inArray(rating.tmdbId, tmdbIds),
+      ),
+     );
+   }),
+  ),
+  Promise.all(
+   chunks.map((chunk) => {
+    const { kinds, tmdbIds } = refFilter(chunk);
+    return db
+     .select({
+      kind: review.kind,
+      tmdbId: review.tmdbId,
+      body: review.body,
+      containsSpoilers: review.containsSpoilers,
+     })
+     .from(review)
+     .where(
+      and(
+       eq(review.userId, userId),
+       inArray(review.kind, kinds),
+       inArray(review.tmdbId, tmdbIds),
+      ),
+     );
+   }),
+  ),
+ ]);
 
- const latestWatch = db
-  .select({
-   kind: watchEntry.kind,
-   tmdbId: watchEntry.tmdbId,
-   watchedAt: sql<number>`MAX(${watchEntry.watchedAt})`.as("watchedAt"),
-  })
-  .from(watchEntry)
-  .where(
-   and(
-    eq(watchEntry.userId, userId),
-    inArray(watchEntry.kind, kinds),
-    inArray(watchEntry.tmdbId, tmdbIds),
-   ),
-  )
-  .groupBy(watchEntry.kind, watchEntry.tmdbId)
-  .as("latest_watch");
+ const watchRows = watchPages.flat();
+ const ratingRows = ratingPages.flat();
+ const reviewRows = reviewPages.flat();
 
- // Column references into the raw-SQL CTE. Selecting
- // `requested.kind`/`requested.tmdbId` as sql fragments
- // keeps them in the projection (drizzle cannot trace
- // columns through raw SQL, so typed CTE fields would
- // be optimised away).
- const requestedKind = sql<MediaKind>`requested.kind`;
- const requestedTmdbId = sql<number>`requested.tmdbId`;
-
- const rows = await db
-  .with(requested)
-  .select({
-   kind: requestedKind,
-   tmdbId: requestedTmdbId,
-   watchedAt: latestWatch.watchedAt,
-   ratingValue: rating.value,
-   reviewBody: review.body,
-   containsSpoilers: review.containsSpoilers,
-  })
-  .from(requested)
-  .leftJoin(
-   latestWatch,
-   and(
-    eq(latestWatch.kind, requestedKind),
-    eq(latestWatch.tmdbId, requestedTmdbId),
-   ),
-  )
-  .leftJoin(
-   rating,
-   and(
-    eq(rating.userId, userId),
-    eq(rating.kind, requestedKind),
-    eq(rating.tmdbId, requestedTmdbId),
-   ),
-  )
-  .leftJoin(
-   review,
-   and(
-    eq(review.userId, userId),
-    eq(review.kind, requestedKind),
-    eq(review.tmdbId, requestedTmdbId),
-   ),
-  );
-
- for (const row of rows) {
-  const key = mediaKey({
-   kind: row.kind as MediaKind,
-   tmdbId: row.tmdbId,
-  });
-  const state = states.get(key);
+ for (const row of watchRows) {
+  const state = states.get(mediaKey({ kind: row.kind, tmdbId: row.tmdbId }));
   if (!state) continue;
-  if (row.watchedAt !== null) {
-   state.watched = true;
-   state.watchedAt = new Date(row.watchedAt);
-  }
-  if (row.ratingValue !== null) state.rating = row.ratingValue;
-  if (row.reviewBody !== null) {
-   state.review = {
-    body: row.reviewBody,
-    containsSpoilers: row.containsSpoilers ?? false,
-   };
+  // The coarse `IN` filter can match another user's row only for a key that
+  // was requested, and every requested key is already in the map.
+  state.watched = true;
+  state.watchedAt = new Date(row.watchedAt);
+ }
+
+ for (const row of ratingRows) {
+  const state = states.get(mediaKey({ kind: row.kind, tmdbId: row.tmdbId }));
+  if (state) state.rating = row.value;
+ }
+
+ for (const row of reviewRows) {
+  const state = states.get(mediaKey({ kind: row.kind, tmdbId: row.tmdbId }));
+  if (state) {
+   state.review = { body: row.body, containsSpoilers: row.containsSpoilers };
   }
  }
  return states;
@@ -218,13 +207,17 @@ export async function getEpisodeMarks(
 
 export async function getWatchlist(
  userId: string,
- options: { limit?: number; offset?: number } = {},
+ options: { limit?: number; offset?: number; kind?: MediaKind } = {},
 ): Promise<{ refs: MediaRef[]; hasMore: boolean }> {
  const limit = options.limit ?? 60;
  const rows = await getDb()
   .select({ kind: watchlistItem.kind, tmdbId: watchlistItem.tmdbId })
   .from(watchlistItem)
-  .where(eq(watchlistItem.userId, userId))
+  .where(
+   options.kind
+    ? and(eq(watchlistItem.userId, userId), eq(watchlistItem.kind, options.kind))
+    : eq(watchlistItem.userId, userId),
+  )
   // `addedAt` alone is not a total order — a bulk add writes many rows in the
   // same millisecond — so the id breaks ties and keeps paging stable.
   .orderBy(desc(watchlistItem.addedAt), desc(watchlistItem.id))
@@ -241,7 +234,12 @@ export async function getWatchlist(
 
 export async function getWatched(
  userId: string,
- options: { limit?: number; offset?: number } = {},
+ options: {
+  limit?: number;
+  offset?: number;
+  kind?: MediaKind;
+  sort?: "recent" | "rating";
+ } = {},
 ): Promise<{
  rows: { ref: MediaRef; watchedAt: Date }[];
  hasMore: boolean;
@@ -253,24 +251,59 @@ export async function getWatched(
  // `MAX(watchedAt)` is a raw fragment: integer ms, converted below.
  // Note this default is what bounds the page: callers that resolve every
  // returned ref through the media source would otherwise fan out unbounded.
- const rows = await getDb()
-  .select({
-   kind: watchEntry.kind,
-   tmdbId: watchEntry.tmdbId,
-   watchedAt: sql<number>`MAX(${watchEntry.watchedAt})`.as("watchedAt"),
-  })
-  .from(watchEntry)
-  .where(eq(watchEntry.userId, userId))
-  .groupBy(watchEntry.kind, watchEntry.tmdbId)
-  // Two titles watched in the same millisecond would otherwise be ordered
-  // arbitrarily, and an offset window could repeat or skip one.
-  .orderBy(
-   desc(sql`MAX(${watchEntry.watchedAt})`),
-   desc(watchEntry.kind),
-   desc(watchEntry.tmdbId),
-  )
-  .limit(limit + 1)
-  .offset(options.offset ?? 0);
+ const userFilter = options.kind
+  ? and(eq(watchEntry.userId, userId), eq(watchEntry.kind, options.kind))
+  : eq(watchEntry.userId, userId);
+ // `rating` sort LEFT JOINs the user's score for the same key and
+ // puts unrated titles last; the recent ordering is byte-identical
+ // to the pre-sort default so paging stays stable.
+ const rows =
+  options.sort === "rating"
+   ? await getDb()
+    .select({
+     kind: watchEntry.kind,
+     tmdbId: watchEntry.tmdbId,
+     watchedAt: sql<number>`MAX(${watchEntry.watchedAt})`.as("watchedAt"),
+    })
+    .from(watchEntry)
+    .leftJoin(
+     rating,
+     and(
+      eq(rating.userId, watchEntry.userId),
+      eq(rating.kind, watchEntry.kind),
+      eq(rating.tmdbId, watchEntry.tmdbId),
+     ),
+    )
+    .where(userFilter)
+    .groupBy(watchEntry.kind, watchEntry.tmdbId)
+    .orderBy(
+     sql`${rating.value} IS NULL`,
+     desc(rating.value),
+     desc(sql`MAX(${watchEntry.watchedAt})`),
+     desc(watchEntry.kind),
+     desc(watchEntry.tmdbId),
+    )
+    .limit(limit + 1)
+    .offset(options.offset ?? 0)
+   : await getDb()
+    .select({
+     kind: watchEntry.kind,
+     tmdbId: watchEntry.tmdbId,
+     watchedAt: sql<number>`MAX(${watchEntry.watchedAt})`.as("watchedAt"),
+    })
+    .from(watchEntry)
+    .where(userFilter)
+    .groupBy(watchEntry.kind, watchEntry.tmdbId)
+    // Two titles watched in the same millisecond would otherwise be ordered
+    // arbitrarily, and an offset window could repeat or skip one.
+    .orderBy(
+     desc(sql`MAX(${watchEntry.watchedAt})`),
+     desc(watchEntry.kind),
+     desc(watchEntry.tmdbId),
+    )
+    .limit(limit + 1)
+    .offset(options.offset ?? 0);
+
 
  return {
   rows: rows.slice(0, limit).map((row) => ({
@@ -304,26 +337,297 @@ export async function isInWatchlist(
  * episode), or null when nothing is stored yet.
  */
 export async function getProgress(
-  userId: string,
-  ref: MediaRef,
-  season?: number,
-  episode?: number,
+ userId: string,
+ ref: MediaRef,
+ season?: number,
+ episode?: number,
 ): Promise<{ positionSeconds: number; durationSeconds: number | null } | null> {
-  const rows = await getDb()
-    .select({
-      positionSeconds: playbackProgress.positionSeconds,
-      durationSeconds: playbackProgress.durationSeconds,
-    })
-    .from(playbackProgress)
+ const rows = await getDb()
+  .select({
+   positionSeconds: playbackProgress.positionSeconds,
+   durationSeconds: playbackProgress.durationSeconds,
+  })
+  .from(playbackProgress)
+  .where(
+   and(
+    eq(playbackProgress.userId, userId),
+    eq(
+     playbackProgress.slotKey,
+     progressSlot(ref.kind, ref.tmdbId, season ?? null, episode ?? null),
+    ),
+   ),
+  )
+  .limit(1);
+ return rows[0] ?? null;
+}
+
+export async function getWatchlistKeys(
+ userId: string,
+ refs: MediaRef[],
+): Promise<Set<string>> {
+ if (refs.length === 0) return new Set();
+ const db = getDb();
+ const pages = await Promise.all(
+  chunkRefs(refs).map((chunk) => {
+   const { kinds, tmdbIds } = refFilter(chunk);
+   return db
+    .select({ kind: watchlistItem.kind, tmdbId: watchlistItem.tmdbId })
+    .from(watchlistItem)
     .where(
-      and(
-        eq(playbackProgress.userId, userId),
-        eq(
-          playbackProgress.slotKey,
-          progressSlot(ref.kind, ref.tmdbId, season ?? null, episode ?? null),
-        ),
-      ),
-    )
-    .limit(1);
-  return rows[0] ?? null;
+     and(
+      eq(watchlistItem.userId, userId),
+      inArray(watchlistItem.kind, kinds),
+      inArray(watchlistItem.tmdbId, tmdbIds),
+     ),
+    );
+  }),
+ );
+ return new Set(pages.flat().map((row) => mediaKey(row)));
+}
+
+/** Watch state plus watchlist membership for a whole grid, chunked. */
+export async function getCardStates(
+ userId: string,
+ refs: MediaRef[],
+): Promise<Map<string, { watched: boolean; inWatchlist: boolean }>> {
+ const [states, watchlistKeys] = await Promise.all([
+  getWatchStates(userId, refs),
+  getWatchlistKeys(userId, refs),
+ ]);
+ const cardStates = new Map<
+  string,
+  { watched: boolean; inWatchlist: boolean }
+ >();
+ for (const ref of refs) {
+  const key = mediaKey(ref);
+  cardStates.set(key, {
+   watched: states.get(key)?.watched ?? false,
+   inWatchlist: watchlistKeys.has(key),
+  });
+ }
+ return cardStates;
+}
+
+export interface DiaryEntry {
+ id: string;
+ kind: MediaKind;
+ tmdbId: number;
+ season: number | null;
+ episode: number | null;
+ watchedAt: Date;
+ rewatch: boolean;
+}
+
+/**
+ * The diary: raw `watch_entry` rows, newest first. `year`/`month`
+ * filter via `strftime` on `watchedAt / 1000` — the column is
+ * stored as integer milliseconds, and `strftime` takes unix
+ * seconds.
+ */
+export async function getDiary(
+ userId: string,
+ opts: {
+  limit: number;
+  offset: number;
+  year?: number | null;
+  month?: number | null;
+ },
+): Promise<{ items: DiaryEntry[]; hasMore: boolean }> {
+ const predicates = [eq(watchEntry.userId, userId)];
+ if (opts.year != null) {
+  predicates.push(
+   sql`strftime('%Y', ${watchEntry.watchedAt} / 1000, 'unixepoch') = ${String(opts.year)}`,
+  );
+ }
+ if (opts.month != null) {
+  predicates.push(
+   sql`strftime('%m', ${watchEntry.watchedAt} / 1000, 'unixepoch') = ${String(opts.month).padStart(2, "0")}`,
+  );
+ }
+
+ const rows = await getDb()
+  .select({
+   id: watchEntry.id,
+   kind: watchEntry.kind,
+   tmdbId: watchEntry.tmdbId,
+   season: watchEntry.season,
+   episode: watchEntry.episode,
+   watchedAt: watchEntry.watchedAt,
+   rewatch: watchEntry.rewatch,
+  })
+  .from(watchEntry)
+  .where(and(...predicates))
+  // `id` breaks ties for rows logged in the same millisecond,
+  // keeping the page order stable.
+  .orderBy(desc(watchEntry.watchedAt), desc(watchEntry.id))
+  .limit(opts.limit + 1)
+  .offset(opts.offset);
+
+ return {
+  items: rows.slice(0, opts.limit).map((row) => ({
+   id: row.id,
+   kind: row.kind,
+   tmdbId: row.tmdbId,
+   season: row.season,
+   episode: row.episode,
+   watchedAt: row.watchedAt,
+   rewatch: row.rewatch,
+  })),
+  hasMore: rows.length > opts.limit,
+ };
+}
+
+/** Distinct diary years, newest first — one statement. */
+export async function getDiaryYears(userId: string): Promise<number[]> {
+ // The expression is repeated in ORDER BY rather than named by alias: drizzle
+ // emits this projection without an alias, and SQLite then reads a bare `year`
+ // as a column of watch_entry ("no such column: year").
+ const year = sql<number>`strftime('%Y', ${watchEntry.watchedAt} / 1000, 'unixepoch')`;
+ const rows = await getDb()
+  .selectDistinct({ year })
+  .from(watchEntry)
+  .where(eq(watchEntry.userId, userId))
+  .orderBy(desc(year));
+ return rows.map((row) => Number(row.year));
+}
+
+export async function isLiked(
+ userId: string,
+ kind: MediaKind,
+ tmdbId: number,
+): Promise<boolean> {
+ const rows = await getDb()
+  .select({ id: mediaLike.id })
+  .from(mediaLike)
+  .where(
+   and(
+    eq(mediaLike.userId, userId),
+    eq(mediaLike.kind, kind),
+    eq(mediaLike.tmdbId, tmdbId),
+   ),
+  )
+  .limit(1);
+ return rows.length > 0;
+}
+
+export async function getLikedKeys(
+ userId: string,
+ refs: MediaRef[],
+): Promise<Set<string>> {
+ if (refs.length === 0) return new Set();
+ const db = getDb();
+ const pages = await Promise.all(
+  chunkRefs(refs).map((chunk) => {
+   const { kinds, tmdbIds } = refFilter(chunk);
+   return db
+    .select({ kind: mediaLike.kind, tmdbId: mediaLike.tmdbId })
+    .from(mediaLike)
+    .where(
+     and(
+      eq(mediaLike.userId, userId),
+      inArray(mediaLike.kind, kinds),
+      inArray(mediaLike.tmdbId, tmdbIds),
+     ),
+    );
+  }),
+ );
+ return new Set(pages.flat().map((row) => mediaKey(row)));
+}
+
+export async function getLikedTitles(
+ userId: string,
+ opts: { limit: number; offset?: number },
+): Promise<MediaRef[]> {
+ const rows = await getDb()
+  .select({ kind: mediaLike.kind, tmdbId: mediaLike.tmdbId })
+  .from(mediaLike)
+  .where(eq(mediaLike.userId, userId))
+  .orderBy(desc(mediaLike.createdAt), desc(mediaLike.id))
+  .limit(opts.limit)
+  .offset(opts.offset ?? 0);
+ return rows.map((row) => ({ kind: row.kind, tmdbId: row.tmdbId }));
+}
+
+/**
+ * Always length 4, index = slot. `favorite_user_position` is
+ * UNIQUE, so at most one row per position — empty slots are null.
+ */
+export async function getFavorites(
+ userId: string,
+): Promise<(MediaRef | null)[]> {
+ const rows = await getDb()
+  .select({
+   kind: favorite.kind,
+   tmdbId: favorite.tmdbId,
+   position: favorite.position,
+  })
+  .from(favorite)
+  .where(eq(favorite.userId, userId));
+
+ const slots: (MediaRef | null)[] = [null, null, null, null];
+ for (const row of rows) {
+  if (row.position >= 0 && row.position < 4) {
+   slots[row.position] = { kind: row.kind, tmdbId: row.tmdbId };
+  }
+ }
+ return slots;
+}
+
+export interface ProfileStats {
+ watchedMovies: number;
+ watchedSeries: number;
+ watchEntries: number;
+ entriesThisYear: number;
+ ratings: number;
+ reviews: number;
+ likes: number;
+}
+
+/**
+ * Profile counts. Title counts use `COUNT(DISTINCT)` — a
+ * rewatch is one watched title — and the rest are plain
+ * `COUNT(*)`. One statement; follower counts are deliberately
+ * absent (they come from `lib/social/queries.ts`).
+ */
+export async function getProfileStats(
+ userId: string,
+): Promise<ProfileStats> {
+ const [watched, entries, ratings, reviews, likes] = await Promise.all([
+  getDb()
+   .select({
+    movies: sql<number>`count(distinct case when ${watchEntry.kind} = 'movie' then ${watchEntry.tmdbId} end)`,
+    series: sql<number>`count(distinct case when ${watchEntry.kind} = 'tv' then ${watchEntry.tmdbId} end)`,
+   })
+   .from(watchEntry)
+   .where(eq(watchEntry.userId, userId)),
+  getDb()
+   .select({
+    total: sql<number>`count(*)`,
+    thisYear: sql<number>`count(case when strftime('%Y', ${watchEntry.watchedAt} / 1000, 'unixepoch') = strftime('%Y', 'now') then 1 end)`,
+   })
+   .from(watchEntry)
+   .where(eq(watchEntry.userId, userId)),
+  getDb()
+   .select({ total: sql<number>`count(*)` })
+   .from(rating)
+   .where(eq(rating.userId, userId)),
+  getDb()
+   .select({ total: sql<number>`count(*)` })
+   .from(review)
+   .where(eq(review.userId, userId)),
+  getDb()
+   .select({ total: sql<number>`count(*)` })
+   .from(mediaLike)
+   .where(eq(mediaLike.userId, userId)),
+ ]);
+
+ return {
+  watchedMovies: watched[0]?.movies ?? 0,
+  watchedSeries: watched[0]?.series ?? 0,
+  watchEntries: entries[0]?.total ?? 0,
+  entriesThisYear: entries[0]?.thisYear ?? 0,
+  ratings: ratings[0]?.total ?? 0,
+  reviews: reviews[0]?.total ?? 0,
+  likes: likes[0]?.total ?? 0,
+ };
 }

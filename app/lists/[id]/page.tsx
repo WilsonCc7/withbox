@@ -1,10 +1,16 @@
 import { PosterGrid } from "@/components/poster-grid";
 import { SiteHeader } from "@/components/site-header";
-import { RemoveFromList } from "@/components/social/list-toolbar";
+import {
+  MoveListItem,
+  RemoveFromList,
+  RenameListForm,
+} from "@/components/social/list-toolbar";
 import type { MediaDetail } from "@/lib/media/types";
 import { mediaSource } from "@/lib/media/runtime";
 import { deleteList } from "@/lib/social/actions";
+import { getCardStates } from "@/lib/library/queries";
 import { getListById, isListOwner } from "@/lib/social/queries";
+import { getRatingsBatch } from "@/lib/ratings";
 import { currentUser } from "@/lib/session";
 
 export default async function ListDetailPage({
@@ -35,14 +41,30 @@ export default async function ListDetailPage({
   const owner = await isListOwner(id, user?.id ?? "");
   const source = mediaSource();
 
-  const items = (
-    await Promise.all(
-      list.items.map(async (ref) =>
-        ref.kind === "movie" ? await source.movie(ref.tmdbId) : await source.tv(ref.tmdbId),
-      ),
-    )
-  ).filter((item): item is MediaDetail => item !== null);
+  // Raw resolutions keep their index alignment with `list.items`,
+  // so the owner controls can show a title even when a detail
+  // is null. getCardStates is two indexed D1 reads;
+  // getRatingsBatch is KV-cached and rate-limited — a cold
+  // cache costs one OMDb call per title. Owner only; visitors
+  // render plain cards.
+  const details = await Promise.all(
+    list.items.map(async (ref) =>
+      ref.kind === "movie" ? await source.movie(ref.tmdbId) : await source.tv(ref.tmdbId),
+    ),
+  );
+  const [cardStates, ratings] = await Promise.all([
+    owner && user
+      ? getCardStates(user.id, list.items)
+      : Promise.resolve(new Map()),
+    owner && user
+      ? getRatingsBatch(source, list.items)
+      : Promise.resolve(new Map<string, never>()),
+  ]);
 
+  const overlays = owner && user ? { ratings, states: cardStates } : undefined;
+  const items = details.filter(
+    (item): item is MediaDetail => item !== null,
+  );
   const titleCount = `${items.length} title${items.length === 1 ? "" : "s"}`;
 
   return (
@@ -61,32 +83,44 @@ export default async function ListDetailPage({
         )}
 
         {owner && (
-          <form action={deleteList} method="post" className="mt-4">
-            <input name="listId" type="hidden" value={list.id} />
-            <button
-              className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-danger transition-colors hover:border-faint"
-              type="submit"
-            >
-              Delete list
-            </button>
-          </form>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <RenameListForm
+              listId={list.id}
+              name={list.name}
+              description={list.description}
+            />
+            <form action={deleteList} method="post">
+              <input name="listId" type="hidden" value={list.id} />
+              <button
+                className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-danger transition-colors hover:border-faint"
+                type="submit"
+              >
+                Delete list
+              </button>
+            </form>
+          </div>
         )}
 
         {items.length === 0 ? (
           <p className="mt-8 text-muted">This list is empty.</p>
         ) : (
           <div className="mt-6">
-            <PosterGrid items={items} />
+            <PosterGrid
+              items={items}
+              ratings={overlays?.ratings}
+              states={overlays?.states}
+            />
             {owner && (
               <ul className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-                {items.map((item) => (
+                {list.items.map((item, index) => (
                   <li
-                    key={`remove-${item.kind}-${item.tmdbId}`}
+                    key={`controls-${item.id}`}
                     className="flex items-center gap-2"
                   >
                     <span className="min-w-0 flex-1 truncate text-sm text-muted">
-                      {item.title}
+                      {details[index]?.title ?? `${item.kind} ${item.tmdbId}`}
                     </span>
+                    <MoveListItem itemId={item.id} />
                     <RemoveFromList
                       kind={item.kind}
                       listId={list.id}

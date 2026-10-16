@@ -39,7 +39,7 @@ export function ActivityItemRow({
           : "";
       body = (
         <>
-          {user} watched {media}
+          {user} {item.rewatch ? "rewatched" : "watched"} {media}
           {se}
         </>
       );
@@ -72,6 +72,13 @@ export function ActivityItemRow({
                 : item.body}
             </p>
           )}
+        </>
+      );
+      break;
+    case "liked":
+      body = (
+        <>
+          {user} liked {media}
         </>
       );
       break;

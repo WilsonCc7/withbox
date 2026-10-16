@@ -45,6 +45,30 @@ export interface Episode {
   stillPath: string | null;
 }
 
+export interface CastMember {
+  tmdbId: number;
+  name: string;
+  character: string | null;
+  profilePath: string | null;
+}
+
+export interface CrewMember {
+  tmdbId: number;
+  name: string;
+  job: string;
+}
+
+export interface Credits {
+  cast: CastMember[];
+  crew: CrewMember[];
+}
+
+export interface CreatedBy {
+  tmdbId: number;
+  name: string;
+  profilePath: string | null;
+}
+
 export interface MovieDetail extends MediaSummary {
   kind: "movie";
   tagline: string | null;
@@ -62,6 +86,7 @@ export interface TvDetail extends MediaSummary {
   status: string;
   genres: Genre[];
   seasons: Season[];
+  createdBy: CreatedBy[];
 }
 
 export type MediaDetail = MovieDetail | TvDetail;
@@ -99,4 +124,13 @@ export interface MediaSource {
   tv(tmdbId: number): Promise<TvDetail | null>;
 
   episodes(tvId: number, seasonNumber: number): Promise<Episode[]>;
+
+  /** TMDB external ids. A missing title yields `{ imdbId: null }`. */
+  externalIds(
+    kind: MediaKind,
+    tmdbId: number,
+  ): Promise<{ imdbId: string | null }>;
+
+  /** Cast and crew. A missing title yields empty lists. */
+  credits(kind: MediaKind, tmdbId: number): Promise<Credits>;
 }

@@ -10,6 +10,7 @@
  * genuinely exercised rather than bypassed.
  */
 import type {
+  Credits,
   Episode,
   MediaKind,
   MediaSummary,
@@ -114,6 +115,15 @@ export function createFixtureSource(): MediaSource {
     ): Promise<Episode[]> {
       const wire = store.seasons[seasonKey(tvId, seasonNumber)];
       return (wire?.episodes ?? []).map(map.mapEpisode);
+    },
+
+    async externalIds(): Promise<{ imdbId: string | null }> {
+      // No fixture external ids: offline mode makes no upstream calls.
+      return { imdbId: null };
+    },
+
+    async credits(): Promise<Credits> {
+      return { cast: [], crew: [] };
     },
   };
 }

@@ -130,38 +130,59 @@ ids from the sign-up response, never from a listing page's first link.
 
 ## Deploying
 
-**1. Create the database.** The D1 binding in `cloudflare.config.ts` carries no `id`, so it
-works locally but must be pointed at a real database before deploying:
+Deployed as Worker `withbox` on **https://withbox.wilsb.me**, and only there. That hostname
+is a Workers route declared in `cloudflare.config.ts` (`triggers.fetch`) behind a proxied
+CNAME to the workers.dev subdomain; `workersDev: false` keeps the workers.dev hostname from
+becoming a second origin, which Better Auth rejects (`BETTER_AUTH_URL` must equal the origin
+the browser actually uses).
+
+**1. Create the database.** D1 database `withbox`, bound by ID:
 
 ```sh
 pnpm exec cf d1 create withbox
 ```
 
-Add the returned UUID to the binding:
-
 ```ts
 DB: bindings.d1({ name: "withbox", id: "your-database-uuid" }),
 ```
 
-**2. Supply the secrets on the *first* deploy.** `TMDB_API_KEY` and `BETTER_AUTH_SECRET` are
-`bindings.secret()` and are not read from `.dev.vars` in production. A Worker that does not
-exist yet has nowhere to hold secrets, so `cf deploy` refuses the deployment outright
-(`The following required secrets have not been set`). Carry them with the first upload
-instead — `.env` format, one `NAME=value` per line:
+**2. Supply the secrets on the *first* deploy.** `TMDB_API_KEY`, `BETTER_AUTH_SECRET` and
+`OMDB_API_KEY` are `bindings.secret()` and are not read from `.dev.vars` in production. A
+Worker that does not exist yet has nowhere to hold secrets, so `cf deploy` refuses the
+deployment outright (`The following required secrets have not been set`). Carry them with
+the first upload instead — `.env` format, one `NAME=value` per line:
 
 ```sh
 pnpm exec cf deploy --prebuilt --secrets-file ./secrets.env
 rm ./secrets.env          # delete immediately; never commit it
 ```
 
-**3. Build for your host and deploy.** `BETTER_AUTH_URL` must equal the public origin and is
-baked into the artifact at build time, so build and deploy in one breath:
+Later rotations are non-interactive:
 
 ```sh
-env -u WITHBOX_TMDB_MODE WITHBOX_BASE_URL=https://your-domain.example pnpm run deploy
+pnpm exec cf workers secrets update OMDB_API_KEY --worker withbox --text '<key>' --type secret_text
 ```
 
-Once the Worker exists, later secret rotations use `pnpm exec cf workers secrets update <NAME>`.
+`OMDB_API_KEY` is optional at runtime — without it every poster and detail page falls back
+to the TMDB score chip instead of IMDb / Rotten Tomatoes, which is exactly what fixture mode
+renders.
+
+**3. Avatars.** R2 must be enabled on the account first, then:
+
+```sh
+pnpm exec cf r2 buckets create withbox-avatars
+```
+
+The `AVATARS` binding is optional too: with no bucket, uploads return silently and profiles
+fall back to name initials.
+
+**4. Build for the host and deploy.** `BETTER_AUTH_URL` is baked into the artifact at build
+time, so build and deploy in one breath — `pnpm run deploy` also applies the fetch trigger
+declared in `cloudflare.config.ts`:
+
+```sh
+env -u WITHBOX_TMDB_MODE WITHBOX_BASE_URL=https://withbox.wilsb.me pnpm run deploy
+```
 
 Then apply the migrations to the remote database. The positional is the **database ID**
 (UUID), not the binding name — get it from `pnpm exec cf d1 list`. `--dir drizzle` is also

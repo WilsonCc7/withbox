@@ -1,4 +1,4 @@
-import { bindings, defineConfig, defineWorker } from "cf/config";
+import { bindings, defineConfig, defineWorker, triggers } from "cf/config";
 
 export default defineConfig({
   worker: defineWorker({
@@ -6,6 +6,13 @@ export default defineConfig({
     entrypoint: "vinext/server/fetch-handler",
     compatibilityDate: "2026-10-07",
     compatibilityFlags: ["nodejs_compat"],
+    // One canonical origin. `BETTER_AUTH_URL` is baked at build time and must
+    // equal the origin the browser uses, so a second hostname (the workers.dev
+    // route) is a second origin that Better Auth would reject.
+    workersDev: false,
+    triggers: [
+      triggers.fetch({ pattern: "withbox.wilsb.me/*", zone: "wilsb.me" }),
+    ],
     assets: { notFoundHandling: "none", runWorkerFirst: ["/_vinext/static-cache/*"] },
     env: {
       ASSETS: bindings.assets(),
@@ -17,6 +24,11 @@ export default defineConfig({
       // The mode is baked at build time so the benchmark can force fixtures.
       TMDB_MODE: bindings.text(process.env.WITHBOX_TMDB_MODE ?? "auto"),
       TMDB_API_KEY: bindings.secret(),
+      // IMDb / Rotten Tomatoes scores. Server-side only; absent degrades to the
+      // TMDB score chip.
+      OMDB_API_KEY: bindings.secret(),
+      // User avatars. Local dev/preview emulates the bucket.
+      AVATARS: bindings.r2({ name: "withbox-avatars" }),
       // The `withbox` database lives in the owner's account; the UUID is not a secret.
       DB: bindings.d1({
         name: "withbox",

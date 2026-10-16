@@ -480,8 +480,15 @@ UID2=$(python3 -c "import json;print(json.load(open('/tmp/signup2.json'))['user'
 curl -s -m 15 "$BASE/people" -b "$JAR2" -o /tmp/people.html
 body /tmp/people.html | grep -q "Loop" || fail "/people does not list the first user"
 # The header renders the signed-in user's own name, so a text check would match
-# it. Assert on the profile LINK instead: /people must not point at the viewer.
-grep -q "/u/$UID2" /tmp/people.html && fail "/people links to the viewer's own profile"
+# it. Assert on the profile LINK instead, scoped to <main>: the mobile tab bar
+# legitimately links to the viewer's own profile ("You"), but the LISTING must
+# not include them.
+python3 - <<PY || fail "/people links to the viewer's own profile"
+import re, sys
+h = open("/tmp/people.html").read()
+main = re.search(r"<main\b.*?</main>", h, re.S)
+sys.exit(1 if main and "/u/$UID2" in main.group(0) else 0)
+PY
 # Take the id from the original sign-up response rather than scraping the first
 # profile link off /people. The local D1 accumulates accounts across runs, so
 # /people lists many users alphabetically and the first link belongs to some
@@ -708,7 +715,196 @@ has_older /tmp/pg2.html && fail "the last feed page still offers an Older link"
 TOTAL=$((P1 + P2))
 [[ "$TOTAL" == "37" ]] || fail "the two pages covered $TOTAL rows, expected 37 (skip or repeat at the boundary)"
 echo "ok  feed partitions 37 activities into 30 + $P2 with no skip or repeat"
+
+# --- feed JSON API -------------------------------------------------------
+# The load-more button reads this route. It must partition the feed exactly the
+# way the server-rendered page does — a cursor that skips or repeats a row at
+# the boundary would look fine in the HTML and be wrong only after hydration.
+CODE=$(curl -s -m 15 "$BASE/api/feed" -b "$JAR3" -o /tmp/feed-api1.json -w '%{http_code}')
+[[ "$CODE" == "200" ]] || fail "/api/feed returned $CODE"
+python3 - <<'PY' || fail "/api/feed page 1 does not carry the 30 rows the HTML page shows"
+import json
+d = json.load(open("/tmp/feed-api1.json"))
+assert len(d["rows"]) == 30, len(d["rows"])
+assert d["next"], "page 1 offers no cursor"
+assert all(r.get("title") for r in d["rows"]), "a row has no title"
+PY
+NEXT=$(python3 -c "import json;print(json.load(open('/tmp/feed-api1.json'))['next'])")
+CODE=$(curl -s -m 15 "$BASE/api/feed?before=$NEXT" -b "$JAR3" -o /tmp/feed-api2.json -w '%{http_code}')
+[[ "$CODE" == "200" ]] || fail "/api/feed?before=<cursor> returned $CODE"
+python3 - <<'PY' || fail "/api/feed did not finish the feed (7 rows, no further cursor)"
+import json
+d = json.load(open("/tmp/feed-api2.json"))
+assert len(d["rows"]) == 7, len(d["rows"])
+assert d["next"] is None, d["next"]
+PY
+CODE=$(curl -s -m 15 "$BASE/api/feed" -o /dev/null -w '%{http_code}')
+[[ "$CODE" == "401" ]] || fail "signed-out /api/feed returned $CODE, expected 401"
+echo "ok  /api/feed pages exactly like the server feed and refuses signed-out callers"
 rm -f "$JAR3"
+
+# --- diary: logging a watch ----------------------------------------------
+# One log = one watch_entry row. The rating and review on the same form are
+# title-level upserts, so logging twice must not duplicate those either.
+ACTJAR="$JAR"
+curl -s -m 15 "$BASE/movie/550" -b "$JAR" -o /tmp/diary-film.html
+LOG=$(action_for /tmp/diary-film.html logWatch)
+[[ -n "$LOG" ]] || fail "no logWatch action on the film page"
+
+STATUS=$(post_action "$BASE/movie/550" "$LOG" kind=movie tmdbId=550 watchedAt=2020-05-04)
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "logWatch returned $STATUS"
+
+curl -s -m 15 "$BASE/diary" -b "$JAR" -o /tmp/diary1.html
+body /tmp/diary1.html | grep -q "Fight Club" || fail "/diary does not list the logged film"
+body /tmp/diary1.html | grep -q "2020-05-04" || fail "/diary does not show the logged date"
+echo "ok  logWatch stores an entry and /diary renders it"
+
+STATUS=$(post_action "$BASE/movie/550" "$LOG" kind=movie tmdbId=550 watchedAt=2020-05-05)
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "the second logWatch returned $STATUS"
+curl -s -m 15 "$BASE/diary" -b "$JAR" -o /tmp/diary2.html
+# Every diary row renders exactly one ISO date, so counting dates counts rows.
+ROWS1=$(count_rows /tmp/diary1.html)
+ROWS2=$(count_rows /tmp/diary2.html)
+[[ "$ROWS2" == "$((ROWS1 + 1))" ]] \
+  || fail "a second log added $((ROWS2 - ROWS1)) diary rows, expected exactly 1"
+body /tmp/diary2.html | grep -q "Rewatch" || fail "the repeat viewing is not flagged as a rewatch"
+echo "ok  a second log adds one row and is flagged as a rewatch"
+
+DEL=$(action_for /tmp/diary2.html deleteWatchEntry)
+[[ -n "$DEL" ]] || fail "no deleteWatchEntry action on /diary"
+ENTRY=$(python3 -c "
+import re
+h = open('/tmp/diary2.html').read()
+tags = re.findall(r'<input[^>]*name=\"entryId\"[^>]*>', h)
+v = re.search(r'value=\"([^\"]+)\"', tags[0]) if tags else None
+print(v.group(1) if v else '')
+")
+[[ -n "$ENTRY" ]] || fail "no entryId hidden field on /diary"
+STATUS=$(post_action "$BASE/diary" "$DEL" entryId="$ENTRY")
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "deleteWatchEntry returned $STATUS"
+curl -s -m 15 "$BASE/diary" -b "$JAR" -o /tmp/diary3.html
+ROWS3=$(count_rows /tmp/diary3.html)
+[[ "$ROWS3" == "$((ROWS2 - 1))" ]] \
+  || fail "deleteWatchEntry removed $((ROWS2 - ROWS3)) rows, expected exactly 1"
+# The other row for the same title survives, so the title stays watched.
+curl -s -m 15 "$BASE/watched" -b "$JAR" -o /tmp/watched-after-diary.html
+body /tmp/watched-after-diary.html | grep -q "Fight Club" \
+  || fail "removing one diary row unwatched a title that still has another row"
+echo "ok  deleteWatchEntry removes exactly one row and leaves the title watched"
+
+# --- likes and favourites ------------------------------------------------
+LIKE=$(action_for /tmp/diary-film.html toggleLiked)
+[[ -n "$LIKE" ]] || fail "no toggleLiked action on the film page"
+STATUS=$(post_action "$BASE/movie/550" "$LIKE" kind=movie tmdbId=550)
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "toggleLiked returned $STATUS"
+curl -s -m 15 "$BASE/u/$UID1" -b "$JAR" -o /tmp/prof-self.html
+body /tmp/prof-self.html | grep -q "Liked" || fail "the profile renders no liked section"
+echo "ok  toggleLiked records a like the profile renders"
+
+FAV=$(action_for /tmp/diary-film.html setFavorite)
+[[ -n "$FAV" ]] || fail "no setFavorite action on the film page"
+STATUS=$(post_action "$BASE/movie/550" "$FAV" kind=movie tmdbId=550 slot=0)
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "setFavorite returned $STATUS"
+curl -s -m 15 "$BASE/movie/550" -b "$JAR" -o /tmp/fav-pinned.html
+body /tmp/fav-pinned.html | grep -q "Slot 1" || fail "the favourite slots are not offered"
+body /tmp/fav-pinned.html | grep -q "remove" || fail "pinning a slot did not mark it occupied"
+STATUS=$(post_action "$BASE/movie/550" "$FAV" kind=movie tmdbId=550 slot=0)
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "the second setFavorite returned $STATUS"
+curl -s -m 15 "$BASE/movie/550" -b "$JAR" -o /tmp/fav-cleared.html
+body /tmp/fav-cleared.html | grep -q "empty" || fail "re-pinning the same title did not clear the slot"
+echo "ok  setFavorite pins a slot, and calling it again clears it"
+
+# --- list editing --------------------------------------------------------
+ACTJAR="$JAR2"
+curl -s -m 15 "$BASE/movie/550" -b "$JAR2" -o /tmp/readd-film.html
+ADD=$(action_for /tmp/readd-film.html addToList)
+STATUS=$(post_action "$BASE/movie/550" "$ADD" listId="$LID" kind=movie tmdbId=550)
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "re-adding the film returned $STATUS"
+curl -s -m 15 "$BASE/tv/94605" -b "$JAR2" -o /tmp/readd-tv.html
+ADDTV=$(action_for /tmp/readd-tv.html addToList)
+[[ -n "$ADDTV" ]] || fail "no addToList action on the series page"
+STATUS=$(post_action "$BASE/tv/94605" "$ADDTV" listId="$LID" kind=tv tmdbId=94605)
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "adding the series returned $STATUS"
+
+order_ok() {
+  python3 -c "
+import sys
+h = open('$1').read()
+a, b = h.find('$2'), h.find('$3')
+sys.exit(0 if a != -1 and b != -1 and a < b else 1)
+"
+}
+
+curl -s -m 15 "$BASE/lists/$LID" -b "$JAR2" -o /tmp/list-two.html
+order_ok /tmp/list-two.html "/movie/550" "/tv/94605" \
+  || fail "two added titles are not in insertion order"
+
+MOVE=$(action_for /tmp/list-two.html moveListItem)
+[[ -n "$MOVE" ]] || fail "no moveListItem action on an owned list"
+# The last itemId input belongs to the second row (both rows are position-ordered).
+ITEM=$(python3 -c "
+import re
+h = open('/tmp/list-two.html').read()
+tags = re.findall(r'<input[^>]*name=\"itemId\"[^>]*>', h)
+v = re.search(r'value=\"([^\"]+)\"', tags[-1]) if tags else None
+print(v.group(1) if v else '')
+")
+[[ -n "$ITEM" ]] || fail "no itemId hidden field on the list page"
+STATUS=$(post_action "$BASE/lists/$LID" "$MOVE" itemId="$ITEM" direction=up)
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "moveListItem returned $STATUS"
+curl -s -m 15 "$BASE/lists/$LID" -b "$JAR2" -o /tmp/list-moved.html
+order_ok /tmp/list-moved.html "/tv/94605" "/movie/550" || fail "moveListItem did not swap the entries"
+echo "ok  moveListItem reorders a list in one swap"
+
+RENAME=$(action_for /tmp/list-two.html renameList)
+[[ -n "$RENAME" ]] || fail "no renameList action on an owned list"
+STATUS=$(post_action "$BASE/lists/$LID" "$RENAME" listId="$LID" name="Renamed films" description="Edited")
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "renameList returned $STATUS"
+curl -s -m 15 "$BASE/lists/$LID" -b "$JAR2" -o /tmp/list-renamed.html
+body /tmp/list-renamed.html | grep -q "Renamed films" || fail "renameList did not rename the list"
+body /tmp/list-renamed.html | grep -q "Edited" || fail "renameList did not store the description"
+echo "ok  renameList updates the name and description"
+
+# --- avatar upload -------------------------------------------------------
+ACTJAR="$JAR"
+curl -s -m 15 "$BASE/settings" -b "$JAR" -o /tmp/settings.html
+AV=$(action_for /tmp/settings.html uploadAvatar)
+[[ -n "$AV" ]] || fail "no uploadAvatar action on /settings"
+# The smallest valid PNG (1x1), built here so no binary fixture is committed.
+python3 -c "
+import base64, pathlib
+pathlib.Path('/tmp/avatar.png').write_bytes(base64.b64decode(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg=='))
+"
+STATUS=$(curl -s -m 20 -X POST "$BASE/settings" -b "$JAR" -c "$JAR" -H "Origin: $BASE" \
+  -F "$AV=" -F "avatar=@/tmp/avatar.png;type=image/png" -o /dev/null -w '%{http_code}')
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "uploadAvatar returned $STATUS"
+
+# `uploadAvatar` returns without writing when no bucket is bound, so an empty
+# column means "no R2 locally" rather than a failed upload. A stored path that
+# the route cannot serve is a real failure and must be caught.
+IMG=$(db_scalar "SELECT image FROM user WHERE id = '$UID1'")
+if [[ "$IMG" == "None" || -z "$IMG" ]]; then
+  echo "skip  avatar upload: no local R2 binding (the action returns silently by design)"
+else
+  CODE=$(curl -s -m 15 "$BASE/api/avatar/$UID1" -D /tmp/avatar-head.txt -o /tmp/avatar-out.png -w '%{http_code}')
+  [[ "$CODE" == "200" ]] || fail "/api/avatar/$UID1 returned $CODE for a stored image"
+  grep -qi '^content-type: image/png' /tmp/avatar-head.txt \
+    || fail "the avatar route served the wrong content type"
+  cmp -s /tmp/avatar.png /tmp/avatar-out.png || fail "avatar bytes do not round-trip through R2"
+  echo "ok  avatar uploads to R2 and round-trips through /api/avatar"
+fi
+
+# --- library filters and sort --------------------------------------------
+CODE=$(curl -s -m 15 "$BASE/watched?kind=movie&sort=rating" -b "$JAR" -o /tmp/w-movie.html -w '%{http_code}')
+[[ "$CODE" == "200" ]] || fail "/watched?kind=movie&sort=rating returned $CODE"
+body /tmp/w-movie.html | grep -q "Fight Club" || fail "the film filter dropped the watched film"
+CODE=$(curl -s -m 15 "$BASE/watched?kind=tv" -b "$JAR" -o /tmp/w-tv.html -w '%{http_code}')
+[[ "$CODE" == "200" ]] || fail "/watched?kind=tv returned $CODE"
+body /tmp/w-tv.html | grep -q "Fight Club" && fail "/watched?kind=tv still lists the watched film"
+CODE=$(curl -s -m 15 "$BASE/watchlist?kind=tv" -b "$JAR" -o /dev/null -w '%{http_code}')
+[[ "$CODE" == "200" ]] || fail "/watchlist?kind=tv returned $CODE"
+echo "ok  the kind filters and the rating sort narrow the grids"
 
 unset ACTJAR
 rm -f "$JAR2"

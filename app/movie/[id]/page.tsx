@@ -1,9 +1,17 @@
+import { CastRow } from "@/components/cast-row";
 import { MediaLibraryPanel } from "@/components/media-library-panel";
+import { RatingBadges } from "@/components/rating-badges";
 import { SiteHeader } from "@/components/site-header";
 import { AddToListPicker } from "@/components/social/list-toolbar";
-import { getWatchState, isInWatchlist } from "@/lib/library/queries";
+import {
+  getFavorites,
+  getWatchState,
+  isInWatchlist,
+  isLiked,
+} from "@/lib/library/queries";
 import { imageUrl } from "@/lib/media/images";
 import { getListsByUser } from "@/lib/social/queries";
+import { getRatings } from "@/lib/ratings";
 import { mediaSource } from "@/lib/media/runtime";
 import { currentUser } from "@/lib/session";
 
@@ -31,7 +39,8 @@ export default async function MoviePage({ params }: { params: Promise<{ id: stri
     );
   }
 
-  const movie = await mediaSource().movie(tmdbId);
+  const source = mediaSource();
+  const movie = await source.movie(tmdbId);
 
   if (!movie) {
     return (
@@ -53,9 +62,17 @@ export default async function MoviePage({ params }: { params: Promise<{ id: stri
 
   const user = await currentUser();
   const ref = { kind: "movie" as const, tmdbId };
-  const [watchState, inWatchlist] = user
-    ? await Promise.all([getWatchState(user.id, ref), isInWatchlist(user.id, ref)])
-    : [null, false];
+  // One round trip for all post-detail work; per-user queries are
+  // skipped entirely when signed out.
+  const [ratings, credits, watchState, inWatchlist, liked, favorites] =
+    await Promise.all([
+      getRatings(source, ref),
+      source.credits("movie", tmdbId),
+      user ? getWatchState(user.id, ref) : null,
+      user ? isInWatchlist(user.id, ref) : false,
+      user ? isLiked(user.id, "movie", tmdbId) : false,
+      user ? getFavorites(user.id) : [],
+    ]);
   const lists = user ? await getListsByUser(user.id) : [];
 
   return (
@@ -75,7 +92,7 @@ export default async function MoviePage({ params }: { params: Promise<{ id: stri
         </div>
 
         <div className="flex flex-col gap-6 sm:flex-row">
-          <div className="w-32 shrink-0 sm:w-48">
+          <div className="w-28 shrink-0 sm:w-48">
             {poster ? (
               <img
                 alt={movie.title}
@@ -91,7 +108,7 @@ export default async function MoviePage({ params }: { params: Promise<{ id: stri
 
           <div className="min-w-0">
             <p className="text-xs uppercase tracking-wide text-accent">Film</p>
-            <h1 className="mt-1 text-3xl font-semibold leading-tight">
+            <h1 className="mt-1 text-2xl font-semibold leading-tight sm:text-3xl">
               {movie.title}
               {movie.year && <span className="ml-2 font-normal text-muted">{movie.year}</span>}
             </h1>
@@ -107,14 +124,15 @@ export default async function MoviePage({ params }: { params: Promise<{ id: stri
               </a>
             </p>
 
-            {movie.voteAverage !== null && (
-              <p className="mt-2 text-sm text-muted">
-                <span className="text-accent">★ {movie.voteAverage.toFixed(1)}</span>
-                {movie.voteCount !== null && (
-                  <span className="text-faint"> ({movie.voteCount.toLocaleString()} votes)</span>
-                )}
-              </p>
-            )}
+            <div className="mt-2">
+              <RatingBadges
+                imdb={ratings.imdb}
+                rt={ratings.rt}
+                tmdbScore={movie.voteAverage}
+                voteCount={movie.voteCount}
+                size="md"
+              />
+            </div>
 
             {movie.tagline && <p className="mt-4 text-sm italic text-faint">{movie.tagline}</p>}
 
@@ -126,8 +144,10 @@ export default async function MoviePage({ params }: { params: Promise<{ id: stri
 
         {user && watchState ? (
           <MediaLibraryPanel
+            favorites={favorites}
             inWatchlist={inWatchlist}
             kind="movie"
+            liked={liked}
             state={watchState}
             tmdbId={tmdbId}
           />
@@ -152,6 +172,8 @@ export default async function MoviePage({ params }: { params: Promise<{ id: stri
             <AddToListPicker kind="movie" lists={lists} tmdbId={tmdbId} />
           </div>
         )}
+
+        <CastRow cast={credits.cast} crew={credits.crew} />
       </main>
     </>
   );
