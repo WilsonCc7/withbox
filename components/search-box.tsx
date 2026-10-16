@@ -135,7 +135,7 @@ export function SearchBox({ defaultQuery = "" }: { defaultQuery?: string }) {
      aria-controls="search-listbox"
      aria-expanded={open}
      autoComplete="off"
-     className="w-full rounded-md border border-border bg-surface py-1.5 pl-8 pr-3 text-sm text-fg transition-colors placeholder:text-faint focus:border-accent"
+     className="w-full rounded-md border border-border-strong bg-surface py-1.5 pl-8 pr-3 text-sm text-fg transition-colors placeholder:text-faint focus:border-accent"
      id="site-search"
      name="q"
      onBlur={(event) => {

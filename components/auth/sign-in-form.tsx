@@ -46,7 +46,7 @@ export default function SignInForm() {
           <span className="text-muted">Email</span>
           <input
             autoComplete="email"
-            className="rounded border border-border bg-surface px-3 py-2 text-fg"
+            className="rounded border border-border-strong bg-surface px-3 py-2 text-fg"
             name="email"
             required
             type="email"
@@ -57,7 +57,7 @@ export default function SignInForm() {
           <span className="text-muted">Password</span>
           <input
             autoComplete="current-password"
-            className="rounded border border-border bg-surface px-3 py-2 text-fg"
+            className="rounded border border-border-strong bg-surface px-3 py-2 text-fg"
             minLength={8}
             name="password"
             required

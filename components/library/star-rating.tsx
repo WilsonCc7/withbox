@@ -122,7 +122,7 @@ export function StarButtons({ value, name }: { value: number | null; name: strin
    {value != null && (
     <button
      aria-label="Clear rating"
-     className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-faint transition-colors hover:border-faint hover:text-fg"
+     className="rounded-md border border-border-strong bg-surface px-2 py-1 text-xs text-faint transition-colors hover:border-faint hover:text-fg"
      name={name}
      type="submit"
      value=""

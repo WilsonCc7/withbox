@@ -36,7 +36,14 @@ export function MediaCard({
   const poster = imageUrl(item.posterPath, "w342");
 
   return (
-    <div className="group relative flex flex-col overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface transition-colors hover:border-faint">
+    /* The ring has to live on the root: the anchor inside it gets the global
+       amber outline, and the root's `overflow-hidden` (what keeps the poster
+       and the progress bar inside the rounded corners) clips it away. An
+       outline is drawn outside the element's own border box, so the root's
+       own ring survives its own clipping. `focus-within` rather than
+       `focus-visible`: the ring brackets the whole card, and only a keyboard
+       or pointer focus on the link or an overlay button can trigger it. */
+    <div className="group relative flex flex-col overflow-hidden rounded-[var(--radius-card)] border border-border-strong bg-surface transition-colors hover:border-faint focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent">
       <a className="flex flex-1 flex-col" href={href}>
         <div className="relative aspect-[2/3] w-full bg-surface-hi">
           {poster ? (

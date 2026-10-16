@@ -65,9 +65,11 @@ export function LogForm({
   }
 
   return (
-    // The panel section already draws the only border on this card, so the
-    // disclosure is a bare tinted surface — no second outline inside it.
-    <details className="rounded-[var(--radius-control)] bg-surface-hi">
+    // The panel already draws a border, but this disclosure sits a shade
+    // above the panel surface, so on its own it read as a blank input field.
+    // The outline names it as a control; the `border-t` below stays a hairline
+    // divider, because it separates rather than bounds.
+    <details className="rounded-[var(--radius-control)] border border-border-strong bg-surface-hi">
       <summary className="cursor-pointer px-3 py-2 text-sm text-muted hover:text-fg">
         Log a viewing
       </summary>
@@ -82,7 +84,7 @@ export function LogForm({
         <label className="flex flex-col gap-1 text-sm text-muted" htmlFor="log-watched-at">
           Watched on
           <input
-            className="w-40 rounded-[var(--radius-control)] border border-border bg-surface px-3 py-2 text-sm text-fg focus:border-accent"
+            className="w-40 rounded-[var(--radius-control)] border border-border-strong bg-surface px-3 py-2 text-sm text-fg focus:border-accent"
             defaultValue={defaultDate}
             id="log-watched-at"
             name="watchedAt"
@@ -104,7 +106,7 @@ export function LogForm({
 
         <button
           aria-busy={pending}
-          className={`self-start rounded-[var(--radius-control)] border border-border bg-surface px-3 py-1.5 text-sm text-fg transition-colors hover:border-faint${
+          className={`self-start rounded-[var(--radius-control)] border border-border-strong bg-surface px-3 py-1.5 text-sm text-fg transition-colors hover:border-faint${
             pending ? " opacity-60" : ""
           }`}
           type="submit"

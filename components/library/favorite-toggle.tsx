@@ -40,7 +40,9 @@ export function FavoriteToggle({
   }
 
   return (
-    <details className="rounded-[var(--radius-control)] bg-surface-hi">
+    // Same reason as `LogForm`: without an outline the tinted surface reads as
+    // a blank field rather than a disclosure.
+    <details className="rounded-[var(--radius-control)] border border-border-strong bg-surface-hi">
       <summary className="cursor-pointer px-3 py-2 text-sm text-muted transition-colors hover:text-fg">
         Favorites
       </summary>
@@ -64,7 +66,7 @@ export function FavoriteToggle({
                 aria-busy={pending}
                 aria-pressed={current}
                 className={`flex min-h-11 cursor-pointer items-center rounded-[var(--radius-control)] border bg-surface px-2.5 text-xs text-muted transition-colors hover:border-faint hover:text-fg active:bg-surface-hi disabled:cursor-not-allowed disabled:opacity-60 ${
-                  current ? "border-accent" : "border-border"
+                  current ? "border-accent" : "border-border-strong"
                 }`}
                 disabled={pending}
                 type="submit"

@@ -25,7 +25,7 @@ export function ReviewForm({
         Review
       </label>
       <textarea
-        className="min-h-24 w-full rounded-[var(--radius-control)] border border-border bg-surface px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent"
+        className="min-h-24 w-full rounded-[var(--radius-control)] border border-border-strong bg-surface px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent"
         defaultValue={body}
         id="review-body"
         name="body"
@@ -41,7 +41,7 @@ export function ReviewForm({
         Contains spoilers
       </label>
       <button
-        className="self-start rounded-[var(--radius-control)] border border-border bg-surface px-3 py-1.5 text-sm text-fg transition-colors hover:border-faint"
+        className="self-start rounded-[var(--radius-control)] border border-border-strong bg-surface px-3 py-1.5 text-sm text-fg transition-colors hover:border-faint"
         type="submit"
       >
         Save review

@@ -157,6 +157,10 @@ export default async function ProfilePage({
     recentReviews.items.map((item) => resolve({ kind: item.kind, tmdbId: item.tmdbId })),
   );
 
+  // Row counts drive section visibility, never resolved counts: a pinned
+  // favourite whose detail lookup failed still occupies its slot below.
+  const hasFavorites = favorites.some(Boolean);
+
   const initials = profile.name
     .split(/\s+/)
     .map((word) => word.charAt(0))
@@ -223,64 +227,86 @@ export default async function ProfilePage({
           {statsLine(stats, counts.followers, counts.following)}
         </p>
 
-        <section>
-          <h2 className="mb-4 text-xl font-semibold text-fg">Favorites</h2>
-          <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {favorites.map((ref, slot) => {
-              const item = ref ? (favoriteItems[slot] ?? null) : null;
-              // Empty slots keep a dashed box so the row never collapses.
-              if (!ref || !item) {
-                return (
-                  <li
-                    key={slot}
-                    aria-hidden="true"
-                    // A pinned ref whose detail failed keeps its slot and says
-                    // why, so the box never reads as an empty slot.
-                    title={
-                      ref && !item
-                        ? `${ref.kind} · ${ref.tmdbId} — details unavailable`
-                        : undefined
-                    }
-                    className="aspect-[2/3] rounded-[var(--radius-card)] border border-dashed border-border bg-surface"
-                  />
-                );
-              }
-              const href = detailHref(ref.kind, ref.tmdbId);
-              const poster = imageUrl(item.posterPath, "w185");
-              return (
-                <li key={slot}>
-                  <a className="block" href={href}>
-                    {poster ? (
-                      <img
-                        alt={`${item.title} poster`}
-                        className="aspect-[2/3] w-full rounded-[var(--radius-card)] border border-border object-cover"
-                        loading="lazy"
-                        src={poster}
+        {(hasFavorites || isSelf) && (
+          <section>
+            <h2 className="mb-4 text-xl font-semibold text-fg">Favorites</h2>
+            {hasFavorites ? (
+              <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {favorites.map((ref, slot) => {
+                  const item = ref ? (favoriteItems[slot] ?? null) : null;
+                  // Empty slots keep a dashed box so the row never collapses.
+                  if (!ref || !item) {
+                    return (
+                      <li
+                        key={slot}
+                        aria-hidden="true"
+                        // A pinned ref whose detail failed keeps its slot and
+                        // says why, so the box never reads as an empty slot.
+                        title={
+                          ref && !item
+                            ? `${ref.kind} · ${ref.tmdbId} — details unavailable`
+                            : undefined
+                        }
+                        className="aspect-[2/3] rounded-[var(--radius-card)] border border-dashed border-border-strong bg-surface"
                       />
-                    ) : (
-                      <div className="aspect-[2/3] w-full rounded-[var(--radius-card)] border border-border bg-surface-hi" />
-                    )}
-                    <p className="mt-1 truncate text-xs text-fg">{item.title}</p>
-                  </a>
-                  {/* Re-posting the pinned title unpins it — the delete path. */}
-                  {isSelf && (
-                    <form action={setFavorite} method="post">
-                      <input name="kind" type="hidden" value={ref.kind} />
-                      <input name="tmdbId" type="hidden" value={ref.tmdbId} />
-                      <input name="slot" type="hidden" value={slot} />
-                      <button
-                        className="mt-1 flex min-h-11 w-full cursor-pointer items-center justify-center rounded-[var(--radius-control)] border border-border text-xs text-muted transition-colors hover:border-danger hover:text-danger active:bg-surface-hi"
-                        type="submit"
-                      >
-                        Remove
-                      </button>
-                    </form>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        </section>
+                    );
+                  }
+                  const href = detailHref(ref.kind, ref.tmdbId);
+                  const poster = imageUrl(item.posterPath, "w185");
+                  return (
+                    <li key={slot}>
+                      <a className="block" href={href}>
+                        {poster ? (
+                          <img
+                            alt={`${item.title} poster`}
+                            className="aspect-[2/3] w-full rounded-[var(--radius-card)] border border-border-strong object-cover"
+                            loading="lazy"
+                            src={poster}
+                          />
+                        ) : (
+                          <div className="aspect-[2/3] w-full rounded-[var(--radius-card)] border border-border-strong bg-surface-hi" />
+                        )}
+                        <p className="mt-1 truncate text-xs text-fg">{item.title}</p>
+                      </a>
+                      {/* Re-posting the pinned title unpins it — the delete path. */}
+                      {isSelf && (
+                        <form action={setFavorite} method="post">
+                          <input name="kind" type="hidden" value={ref.kind} />
+                          <input name="tmdbId" type="hidden" value={ref.tmdbId} />
+                          <input name="slot" type="hidden" value={slot} />
+                          <button
+                            className="mt-1 flex min-h-11 w-full cursor-pointer items-center justify-center rounded-[var(--radius-control)] border border-border-strong text-xs text-muted transition-colors hover:border-danger hover:text-danger active:bg-surface-hi"
+                            type="submit"
+                          >
+                            Remove
+                          </button>
+                        </form>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              // Own profile, nothing pinned: the four slots at a glance
+              // instead of four poster-tall voids, plus the one line that
+              // says how to fill them. A visitor gets no section at all.
+              <>
+                <p className="mb-3 text-sm text-muted">
+                  Pick up to four favourites from a title page.
+                </p>
+                <ul className="flex gap-3">
+                  {[0, 1, 2, 3].map((slot) => (
+                    <li
+                      key={slot}
+                      aria-hidden="true"
+                      className="aspect-[2/3] w-16 rounded-[var(--radius-card)] border border-dashed border-border-strong bg-surface"
+                    />
+                  ))}
+                </ul>
+              </>
+            )}
+          </section>
+        )}
 
         {likedRefs.length > 0 && (
           <section className="mt-10">

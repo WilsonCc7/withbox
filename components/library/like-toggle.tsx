@@ -48,7 +48,7 @@ export function LikeToggle({
       <button
         aria-label={optimistic ? "Liked" : "Like"}
         aria-pressed={optimistic}
-        className={`inline-flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-control)] border border-border bg-surface px-3 py-1.5 text-sm transition-colors hover:border-faint active:bg-surface-hi disabled:cursor-not-allowed disabled:opacity-60 ${
+        className={`inline-flex cursor-pointer items-center gap-1.5 rounded-[var(--radius-control)] border border-border-strong bg-surface px-3 py-1.5 text-sm transition-colors hover:border-faint active:bg-surface-hi disabled:cursor-not-allowed disabled:opacity-60 ${
           optimistic ? "text-accent" : "text-fg"
         }`}
         disabled={pending}
