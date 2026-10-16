@@ -9,14 +9,19 @@ export default defineConfig({
     assets: { notFoundHandling: "none", runWorkerFirst: ["/_vinext/static-cache/*"] },
     env: {
       ASSETS: bindings.assets(),
-      VINEXT_KV_CACHE: bindings.kv(),
+      VINEXT_KV_CACHE: bindings.kv({
+        id: "0a4596c051b347c1b83569c74ff25372",
+      }),
       // Workers only expose declared bindings on `process.env`; neither the host
       // shell environment nor `.dev.vars` reaches the Worker without this.
       // The mode is baked at build time so the benchmark can force fixtures.
       TMDB_MODE: bindings.text(process.env.WITHBOX_TMDB_MODE ?? "auto"),
       TMDB_API_KEY: bindings.secret(),
-      // No `id`: deployment needs the real D1 database UUID from `cf d1 create`.
-      DB: bindings.d1({ name: "withbox" }),
+      // The `withbox` database lives in the owner's account; the UUID is not a secret.
+      DB: bindings.d1({
+        name: "withbox",
+        id: "e5090792-bfad-48ef-9a12-b82094d547e8",
+      }),
       BETTER_AUTH_SECRET: bindings.secret(),
       // Must be set for a real deployment; localhost is the dev default only.
       BETTER_AUTH_URL: bindings.text(

@@ -158,11 +158,14 @@ it is baked into the artifact at build time:
 WITHBOX_BASE_URL=https://your-domain.example pnpm run deploy
 ```
 
-Then apply the migrations to the remote database. `--dir drizzle` is required: the command
-defaults to `./migrations`, and Drizzle wrote flat `.sql` files into `drizzle/`:
+Then apply the migrations to the remote database. The positional is the **database ID**
+(UUID), not the binding name — get it from `pnpm exec cf d1 list`. `--dir drizzle` is also
+required: the command defaults to `./migrations`, and Drizzle wrote flat `.sql` files into
+`drizzle/`:
 
 ```sh
-pnpm exec cf d1 migrations apply withbox --dir drizzle
+pnpm exec cf d1 list                                        # find the database UUID
+pnpm exec cf d1 migrations apply <database-uuid> --dir drizzle
 ```
 
 Remote is the default target; add `--local` to apply against local simulation instead.
