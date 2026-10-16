@@ -906,6 +906,133 @@ CODE=$(curl -s -m 15 "$BASE/watchlist?kind=tv" -b "$JAR" -o /dev/null -w '%{http
 [[ "$CODE" == "200" ]] || fail "/watchlist?kind=tv returned $CODE"
 echo "ok  the kind filters and the rating sort narrow the grids"
 
+# --- a fractional playhead is stored, not dropped ------------------------
+# The live bridge forwards the provider's currentTime verbatim, so a
+# `timeupdate` really does report 42.5. The parse used to reject anything that
+# was not an integer and return without writing, which read as "resume is
+# broken" for every player that ticks in fractions.
+ACTJAR="$JAR" post_action "$BASE/watch/movie/550" "\$ACTION_ID_$SAVE" \
+  kind=movie tmdbId=550 position=42.5 duration=5400 >/dev/null
+FPOS=$(db_scalar "SELECT positionSeconds FROM playback_progress WHERE kind='movie' AND tmdbId=550")
+[[ "$FPOS" == "43" ]] || fail "a fractional position stored $FPOS, expected 43"
+echo "ok  a fractional playback position is rounded and stored"
+
+# --- a stored position prefers a source that can report progress ---------
+# framextv cannot send playback back, so a film with a saved position used to
+# open there and the bridge was never mounted: neither resume nor saving
+# happened. With a position and no ?source=, the page must choose one that can.
+curl -s -m 15 "$BASE/watch/movie/550" -b "$JAR" -o /tmp/resume-film.html
+RF=$(iframe_src /tmp/resume-film.html)
+[[ "$RF" == *vidsrc* ]] || fail "a resumable film did not pick a progress-capable source (got $RF)"
+body /tmp/resume-film.html | grep -qi "resum" || fail "the resume-aware film page shows no resume note"
+
+# Without a stored position the film default must stay framextv: preferResume
+# is for continuing, not for reordering a fresh start, and an explicit choice
+# still outranks both. RETURNING makes the delete readable through db_scalar.
+db_scalar "DELETE FROM playback_progress WHERE kind='movie' AND tmdbId=550 RETURNING 1" >/dev/null
+curl -s -m 15 "$BASE/watch/movie/550" -b "$JAR" -o /tmp/fresh-film.html
+FF=$(iframe_src /tmp/fresh-film.html)
+[[ "$FF" == *framextv* ]] || fail "a fresh film did not default to framextv (got $FF)"
+echo "ok  a saved position prefers a resumable source, a fresh film keeps the default"
+
+# Leave the film mid-watch for the continue-watching check at the end.
+ACTJAR="$JAR" post_action "$BASE/watch/movie/550" "\$ACTION_ID_$SAVE" \
+  kind=movie tmdbId=550 position=600 duration=5000 >/dev/null
+
+# --- a different favourite slot moves the title --------------------------
+# Same slot toggles off; a DIFFERENT slot used to delete the row instead of
+# moving it, so re-pinning a favourite elsewhere silently removed it.
+FAV=$(action_for /tmp/fav-cleared.html setFavorite)
+[[ -n "$FAV" ]] || fail "no setFavorite action on the film page"
+STATUS=$(post_action "$BASE/movie/550" "$FAV" kind=movie tmdbId=550 slot=0)
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "setFavorite slot 0 returned $STATUS"
+STATUS=$(post_action "$BASE/movie/550" "$FAV" kind=movie tmdbId=550 slot=2)
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "setFavorite slot 2 returned $STATUS"
+FPOS=$(db_scalar "SELECT position FROM favorite WHERE userId='$UID1' AND kind='movie' AND tmdbId=550")
+[[ "$FPOS" == "2" ]] || fail "moving the favourite left it at slot $FPOS, expected 2"
+FROWS=$(db_scalar "SELECT COUNT(*) FROM favorite WHERE userId='$UID1'")
+[[ "$FROWS" == "1" ]] || fail "the move left $FROWS favourite rows, expected 1"
+# The same slot again is a toggle off, and leaves nothing behind.
+STATUS=$(post_action "$BASE/movie/550" "$FAV" kind=movie tmdbId=550 slot=2)
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "clearing favourite slot 2 returned $STATUS"
+FROWS=$(db_scalar "SELECT COUNT(*) FROM favorite WHERE userId='$UID1'")
+[[ "$FROWS" == "0" ]] || fail "re-pinning the same slot left $FROWS favourite rows, expected 0"
+echo "ok  a different favourite slot moves the title, the same slot clears it"
+
+# --- a double submit cannot duplicate a row ------------------------------
+# Every insert is preceded by a "does it exist" read, so two overlapping
+# submissions both see nothing and both write. These actions are
+# insert-if-absent, so after a double submit exactly one row is correct.
+# (The toggles are not tested this way: a toggle legitimately ends at zero.)
+race_post() { # url action kv... — two concurrent POSTs, both codes on stdout
+  local url="$1" action="$2"; shift 2
+  local args=(-F "$action=")
+  for kv in "$@"; do args+=(-F "$kv"); done
+  local f1 f2 p1 p2
+  f1=$(mktemp); f2=$(mktemp)
+  curl -s -m 20 -X POST "$url" -b "$JAR4" -H "Origin: $BASE" "${args[@]}" \
+    -o /dev/null -w '%{http_code}\n' > "$f1" &
+  p1=$!
+  curl -s -m 20 -X POST "$url" -b "$JAR4" -H "Origin: $BASE" "${args[@]}" \
+    -o /dev/null -w '%{http_code}\n' > "$f2" &
+  p2=$!
+  # Wait on these two PIDs, never a bare `wait`: the script's own preview
+  # server is a background job of this shell, and a bare `wait` inside a
+  # command substitution tries to reap it forever.
+  wait "$p1" || true
+  wait "$p2" || true
+  cat "$f1" "$f2"
+  rm -f "$f1" "$f2"
+}
+
+JAR4="$(mktemp)"
+curl -s -m 20 -X POST "$BASE/api/auth/sign-up/email" -H "Content-Type: application/json" \
+  -H "Origin: $BASE" -d "{\"email\":\"race-$(date +%s)@example.com\",\"password\":\"$PASS\",\"name\":\"Race\"}" \
+  -c "$JAR4" -o /tmp/signup4.json
+UID4=$(python3 -c "import json;print(json.load(open('/tmp/signup4.json'))['user']['id'])" 2>/dev/null || true)
+[[ -n "$UID4" ]] || fail "could not read the fourth user's id from sign-up"
+
+CODES=$(race_post "$BASE/u/$UID1" "$FOLLOW" userId="$UID1")
+[[ "$(printf '%s\n' $CODES | grep -c '^200$')" == "2" ]] \
+  || fail "two concurrent follows returned: $(echo $CODES)"
+ROWS=$(db_scalar "SELECT COUNT(*) FROM follow WHERE followerId='$UID4' AND followingId='$UID1'")
+[[ "$ROWS" == "1" ]] || fail "two concurrent follows left $ROWS rows, expected 1"
+
+curl -s -m 15 "$BASE/lists" -b "$JAR4" -o /tmp/race-lists.html
+CL4=$(action_for /tmp/race-lists.html createList)
+# post_action authenticates as $ACTJAR, which is still the primary user at this
+# point — without this the list would be created for the wrong account and the
+# race user's /lists would show nothing.
+ACTJAR="$JAR4"
+STATUS=$(post_action "$BASE/lists" "$CL4" name="Race list")
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "createList for the race user returned $STATUS"
+curl -s -m 15 "$BASE/lists" -b "$JAR4" -o /tmp/race-lists2.html
+LID4=$(python3 -c "
+import re
+h = open('/tmp/race-lists2.html').read()
+m = re.search(r'/lists/([A-Za-z0-9_-]+)', h)
+print(m.group(1) if m else '')
+" || true)
+[[ -n "$LID4" ]] || fail "no list link found for the race user"
+curl -s -m 15 "$BASE/movie/550" -b "$JAR4" -o /tmp/race-film.html
+ADD4=$(action_for /tmp/race-film.html addToList)
+[[ -n "$ADD4" ]] || fail "no addToList action on the film page"
+CODES=$(race_post "$BASE/movie/550" "$ADD4" listId="$LID4" kind=movie tmdbId=550)
+[[ "$(printf '%s\n' $CODES | grep -c '^200$')" == "2" ]] \
+  || fail "two concurrent addToList calls returned: $(echo $CODES)"
+ROWS=$(db_scalar "SELECT COUNT(*) FROM list_item WHERE listId='$LID4' AND kind='movie' AND tmdbId=550")
+[[ "$ROWS" == "1" ]] || fail "two concurrent addToList calls left $ROWS rows, expected 1"
+rm -f "$JAR4"
+echo "ok  concurrent double submits leave exactly one row"
+
+# --- an unknown title renders the app's own 404 --------------------------
+# Without app/not-found.tsx the framework's bare error page was all a visitor
+# saw, and /movie/0 is exactly the kind of URL a hand-edited link produces.
+CODE=$(curl -s -m 15 "$BASE/movie/0" -o /tmp/nf.html -w '%{http_code}')
+[[ "$CODE" == "404" ]] || fail "/movie/0 returned $CODE, expected 404"
+body /tmp/nf.html | grep -q "Not found." || fail "/movie/0 does not render the app's not-found page"
+echo "ok  an unknown title renders the app-owned not-found page"
+
 unset ACTJAR
 rm -f "$JAR2"
 

@@ -61,9 +61,8 @@ export function FollowButton({
         <button
           aria-busy={pending}
           aria-label={`Unfollow ${targetName}`}
-          className={`inline-block rounded-md border border-border px-3 py-1.5 text-sm text-muted transition-colors hover:text-fg${
-            pending ? " opacity-60" : ""
-          }`}
+          className="inline-block rounded-md border border-border px-3 py-1.5 text-sm text-muted transition-colors hover:text-fg disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={pending}
           type="submit"
         >
           Following
@@ -83,9 +82,8 @@ export function FollowButton({
       <button
         aria-busy={pending}
         aria-label={`Follow ${targetName}`}
-        className={`inline-block rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-bg${
-          pending ? " opacity-60" : ""
-        }`}
+        className="inline-block rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-bg disabled:cursor-not-allowed disabled:opacity-60"
+        disabled={pending}
         type="submit"
       >
         Follow

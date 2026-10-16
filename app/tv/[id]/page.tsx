@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import { CastRow } from "@/components/cast-row";
 import { MediaLibraryPanel } from "@/components/media-library-panel";
 import { RatingBadges } from "@/components/rating-badges";
@@ -20,30 +21,12 @@ export default async function TvPage({ params }: { params: Promise<{ id: string 
   const { id } = await params;
   const tmdbId = Number(id);
 
-  if (!Number.isInteger(tmdbId) || tmdbId <= 0) {
-    return (
-      <>
-        <SiteHeader />
-        <main className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
-          <h1 className="text-xl">Not a valid series id.</h1>
-        </main>
-      </>
-    );
-  }
+  if (!Number.isInteger(tmdbId) || tmdbId <= 0) notFound();
 
   const source = mediaSource();
   const show = await source.tv(tmdbId);
 
-  if (!show) {
-    return (
-      <>
-        <SiteHeader />
-        <main className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
-          <h1 className="text-xl">No series with id {tmdbId}.</h1>
-        </main>
-      </>
-    );
-  }
+  if (!show) notFound();
 
   const backdrop = imageUrl(show.backdropPath, "w1280");
   const poster = imageUrl(show.posterPath, "w342");

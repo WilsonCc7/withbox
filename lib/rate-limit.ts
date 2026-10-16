@@ -10,21 +10,25 @@ const windows = new Map<string, { start: number; count: number }>();
 
 /** Consumes one slot for `host`; waits out the window when the budget is gone. */
 export async function acquire(host: string, perSecond: number): Promise<void> {
-  const now = Date.now();
-  const window = windows.get(host);
+  // Reserve loop: a caller that finds the window full waits for it to end and
+  // then re-reads, so every waiter consumes its own slot instead of all of
+  // them overwriting the counter with `{ count: 1 }` at the boundary.
+  for (;;) {
+    const now = Date.now();
+    const window = windows.get(host);
 
-  if (!window || now - window.start >= 1000) {
-    windows.set(host, { start: now, count: 1 });
-    return;
+    if (!window || now - window.start >= 1000) {
+      windows.set(host, { start: now, count: 1 });
+      return;
+    }
+
+    if (window.count < perSecond) {
+      window.count += 1;
+      return;
+    }
+
+    await new Promise<void>((resolve) =>
+      setTimeout(resolve, window.start + 1000 - now),
+    );
   }
-
-  if (window.count < perSecond) {
-    window.count += 1;
-    return;
-  }
-
-  const { promise, resolve } = Promise.withResolvers<void>();
-  setTimeout(resolve, window.start + 1000 - now);
-  await promise;
-  windows.set(host, { start: Date.now(), count: 1 });
 }

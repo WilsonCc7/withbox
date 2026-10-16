@@ -60,6 +60,9 @@ function statsLine(stats: ProfileStats, followers: number, following: number): s
   push(stats.watchedMovies, "film");
   push(stats.watchedSeries, "series", "series");
   push(stats.watchEntries, "diary entry", "diary entries");
+  push(stats.entriesThisYear, "this year", "this year");
+  push(stats.ratings, "rating");
+  push(stats.reviews, "review");
   push(stats.likes, "like");
   push(followers, "follower");
   push(following, "following");
@@ -221,6 +224,13 @@ export default async function ProfilePage({
                   <li
                     key={slot}
                     aria-hidden="true"
+                    // A pinned ref whose detail failed keeps its slot and says
+                    // why, so the box never reads as an empty slot.
+                    title={
+                      ref && !item
+                        ? `${ref.kind} · ${ref.tmdbId} — details unavailable`
+                        : undefined
+                    }
                     className="aspect-[2/3] rounded-[var(--radius-card)] border border-dashed border-border bg-surface"
                   />
                 );
@@ -262,9 +272,13 @@ export default async function ProfilePage({
           </ul>
         </section>
 
-        {liked.length > 0 && (
+        {likedRefs.length > 0 && (
           <section className="pb-8">
-            <PosterGrid heading="Liked" items={liked} />
+            {liked.length === 0 ? (
+              <p className="text-muted">These titles could not be loaded right now.</p>
+            ) : (
+              <PosterGrid heading="Liked" items={liked} />
+            )}
           </section>
         )}
 
@@ -281,6 +295,9 @@ export default async function ProfilePage({
                 </a>
               )}
             </div>
+            {diaryDetails.every((detail) => detail === null) && (
+              <p className="text-muted">These titles could not be loaded right now.</p>
+            )}
             <div>
               {diaryPage.items.map((entry, i) => {
                 const detail = diaryDetails[i] ?? null;
@@ -319,6 +336,9 @@ export default async function ProfilePage({
                 All reviews
               </a>
             </div>
+            {reviewDetails.every((detail) => detail === null) && (
+              <p className="text-muted">These titles could not be loaded right now.</p>
+            )}
             <div>
               {recentReviews.items.map((review, i) => {
                 const detail = reviewDetails[i] ?? null;
@@ -386,7 +406,7 @@ export default async function ProfilePage({
         )}
 
         <section className="pb-8">
-          {watched.length === 0 ? (
+          {watchedPage.rows.length === 0 ? (
             page > 1 ? (
               <p className="text-muted">
                 No more titles.{" "}
@@ -400,6 +420,8 @@ export default async function ProfilePage({
             ) : (
               <p className="text-muted">Nothing watched yet.</p>
             )
+          ) : watched.length === 0 ? (
+            <p className="text-muted">These titles could not be loaded right now.</p>
           ) : (
             <>
               {/* "Recently" is only accurate while the grid is the whole set;

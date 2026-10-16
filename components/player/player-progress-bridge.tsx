@@ -92,13 +92,17 @@ export function PlayerProgressBridge({
 
     /**
      * Throttled save: at most one per SAVE_INTERVAL_MS, and only
-     * when the position has advanced at least
+     * when the position has moved at least
      * MIN_POSITION_DELTA_SECONDS since the last save.
+     *
+     * The delta is absolute: seeking backwards is a real change to
+     * where the viewer is, and a signed comparison would never let
+     * 600 → 300 become the resume point.
      */
     function maybeSave(): void {
       const now = performance.now();
       if (
-        latestRef.current.position - lastSavedPosition < MIN_POSITION_DELTA_SECONDS ||
+        Math.abs(latestRef.current.position - lastSavedPosition) < MIN_POSITION_DELTA_SECONDS ||
         now - lastSavedAt < SAVE_INTERVAL_MS
       ) {
         return;
@@ -110,11 +114,12 @@ export function PlayerProgressBridge({
 
     /** Lifecycle flush: pagehide and hidden are the common exits. */
     function flushIfMeaningful(): void {
-      if (latestRef.current.position - lastSavedPosition >= MIN_POSITION_DELTA_SECONDS) {
-        lastSavedAt = performance.now();
-        lastSavedPosition = latestRef.current.position;
-        saveProgress();
+      if (Math.abs(latestRef.current.position - lastSavedPosition) < MIN_POSITION_DELTA_SECONDS) {
+        return;
       }
+      lastSavedAt = performance.now();
+      lastSavedPosition = latestRef.current.position;
+      saveProgress();
     }
 
     function onMessage(event: MessageEvent) {
@@ -137,11 +142,13 @@ export function PlayerProgressBridge({
       if (season !== null) data.set("season", String(season));
       if (episode !== null) data.set("episode", String(episode));
 
-      void Promise.resolve(markAction(data)).then(() => {
-        if (!nextHref) return;
-        router.push(nextHref);
-        router.refresh();
-      });
+      void Promise.resolve(markAction(data))
+        .then(() => {
+          if (!nextHref) return;
+          router.push(nextHref);
+          router.refresh();
+        })
+        .catch(() => {});
     }
 
     function onPageHide(): void {

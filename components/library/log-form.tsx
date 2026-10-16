@@ -1,6 +1,6 @@
 "use client";
 
-import { useOptimistic, useTransition } from "react";
+import { useEffect, useOptimistic, useRef, useTransition } from "react";
 import type { FormEvent } from "react";
 import { StarButtons } from "@/components/library/star-rating";
 import type { MediaKind } from "@/lib/media/types";
@@ -33,6 +33,17 @@ export function LogForm({
 }) {
   const [pending, startTransition] = useTransition();
   const [optimistic, setOptimistic] = useOptimistic(false);
+  const dateRef = useRef<HTMLInputElement>(null);
+
+  // The server renders the UTC date; only the client knows the viewer's zone,
+  // so correct it on mount unless they already typed something. `defaultValue`
+  // is updated too, so the post-submit `form.reset()` restores the local date.
+  useEffect(() => {
+    const input = dateRef.current;
+    if (!input || input.value !== defaultDate) return;
+    input.value = new Date().toLocaleDateString("sv-SE");
+    input.defaultValue = input.value;
+  }, [defaultDate]);
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -74,6 +85,7 @@ export function LogForm({
             defaultValue={defaultDate}
             id="log-watched-at"
             name="watchedAt"
+            ref={dateRef}
             required
             type="date"
           />

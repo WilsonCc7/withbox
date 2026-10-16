@@ -13,6 +13,13 @@
  * client component is a thin wrapper around this.
  */
 
+/**
+ * Below this, a stored position is noise rather than a resume point: resuming
+ * three seconds in is worse than starting over. Shared with the watch page's
+ * resume decision and the continue-watching query so the rule has one home.
+ */
+export const RESUME_MIN_SECONDS = 30;
+
 export type PlaybackSignal =
   | { type: "progress"; positionSeconds: number; durationSeconds: number | null }
   | { type: "completed" };

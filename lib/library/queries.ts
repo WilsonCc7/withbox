@@ -31,10 +31,11 @@ const EMPTY_WATCH_STATE: WatchState = {
  * own kind/tmdbId, a coarse `IN` filter can only over-read rows the caller then
  * ignores by key.
  */
-const REF_CHUNK = 60;
+export const REF_CHUNK = 60;
 
-function chunkRefs(refs: MediaRef[]): MediaRef[][] {
- const chunks: MediaRef[][] = [];
+/** Generic so any keyed list (refs, ids) can be chunked the same way. */
+export function chunkRefs<T>(refs: T[]): T[][] {
+ const chunks: T[][] = [];
  for (let i = 0; i < refs.length; i += REF_CHUNK) {
   chunks.push(refs.slice(i, i + REF_CHUNK));
  }

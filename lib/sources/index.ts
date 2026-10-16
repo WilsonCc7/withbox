@@ -74,15 +74,26 @@ export async function resolveAll(
  * stale bookmark, or a source that no longer supports the title all degrade to
  * the first entry in try-order rather than failing. A parameter that does not
  * work must never turn a playable title into an error page.
+ *
+ * An explicit `preferred` always wins — a remembered choice must never be
+ * overridden. Otherwise `options.preferResume` promotes the first adapter that
+ * reports `resumes: true`, because only those honour `startAtSeconds`; a
+ * resumable position handed to an adapter that ignores it is a resume that
+ * silently starts over.
  */
 export function pickStream(
  results: StreamResult[],
  preferred?: string,
+ options?: { preferResume?: boolean },
 ): StreamResult | null {
  if (results.length === 0) return null;
  if (preferred !== undefined) {
   const chosen = results.find((result) => result.adapter.name === preferred);
   if (chosen) return chosen;
+ }
+ if (options?.preferResume) {
+  const resumable = results.find((result) => result.adapter.resumes === true);
+  if (resumable) return resumable;
  }
  return results[0];
 }

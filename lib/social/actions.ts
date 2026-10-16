@@ -1,6 +1,6 @@
 "use server";
 
-import { and, asc, desc, eq, gt, lt } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, lt } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "@/lib/db";
@@ -9,6 +9,7 @@ import { getDb } from "@/lib/db";
 import { follow as followTable, list, listItem } from "@/db/schema";
 import type { MediaKind } from "@/lib/media/types";
 import { currentUser } from "@/lib/session";
+import { FOLLOW_LIMIT, LIST_LIMIT } from "@/lib/social/queries";
 
 /**
  * Server actions. Every one takes `FormData` so a plain
@@ -48,8 +49,10 @@ async function requireUser(): Promise<{ id: string }> {
 /**
  * Follow is idempotent: a double-submit finds the existing row
  * (the unique `follow_pair` index would otherwise throw) and
- * inserts nothing. A user can never follow themselves — bail
- * silently, like the other no-op guards in this file.
+ * inserts nothing. A user can never follow themselves, and the
+ * follow list is capped at FOLLOW_LIMIT because the feed binds it
+ * into one `inArray` — D1 caps a statement at 100 parameters.
+ * Every bail here is silent, like the other no-op guards.
  */
 export async function follow(formData: FormData): Promise<void> {
  const user = await requireUser();
@@ -58,6 +61,12 @@ export async function follow(formData: FormData): Promise<void> {
  if (targetId === user.id) return;
 
  const db = getDb();
+ const followingRows = await db
+  .select({ following: count() })
+  .from(followTable)
+  .where(eq(followTable.followerId, user.id));
+ if (followingRows[0].following >= FOLLOW_LIMIT) return;
+
  const existing = await db
   .select({ id: followTable.id })
   .from(followTable)
@@ -67,12 +76,17 @@ export async function follow(formData: FormData): Promise<void> {
   .limit(1);
 
  if (existing.length === 0) {
-  await db.insert(followTable).values({
-   id: crypto.randomUUID(),
-   followerId: user.id,
-   followingId: targetId,
-   createdAt: new Date(),
-  });
+  await db
+   .insert(followTable)
+   .values({
+    id: crypto.randomUUID(),
+    followerId: user.id,
+    followingId: targetId,
+    createdAt: new Date(),
+   })
+   // Two overlapping submits can both see no row; the unique index then
+   // rejects the loser, which is the outcome it wanted anyway.
+   .onConflictDoNothing();
  }
 
  await revalidatePaths([`/u/${targetId}`, "/feed"]);
@@ -96,10 +110,20 @@ export async function unfollow(formData: FormData): Promise<void> {
 export async function createList(formData: FormData): Promise<void> {
  const user = await requireUser();
  const name = String(formData.get("name") ?? "").trim();
- if (name === "") return;
+ if (name === "" || name.length > 80) return;
  const description = String(formData.get("description") ?? "").trim();
+ if (description.length > 200) return;
 
- await getDb().insert(list).values({
+ const db = getDb();
+ // Same policy cap the actions enforce elsewhere: a user's lists are read
+ // together, so the count is bounded rather than chunked.
+ const listRows = await db
+  .select({ lists: count() })
+  .from(list)
+  .where(eq(list.userId, user.id));
+ if (listRows[0].lists >= LIST_LIMIT) return;
+
+ await db.insert(list).values({
   id: crypto.randomUUID(),
   userId: user.id,
   name,
@@ -173,14 +197,18 @@ export async function addToList(formData: FormData): Promise<void> {
   .limit(1);
  const position = (maxRows[0]?.position ?? -1) + 1;
 
- await db.insert(listItem).values({
-  id: crypto.randomUUID(),
-  listId,
-  kind,
-  tmdbId,
-  position,
-  addedAt: new Date(),
- });
+ await db
+  .insert(listItem)
+  .values({
+   id: crypto.randomUUID(),
+   listId,
+   kind,
+   tmdbId,
+   position,
+   addedAt: new Date(),
+  })
+  // Overlapping submits both see no row; the unique index rejects the loser.
+  .onConflictDoNothing();
 
  await revalidatePaths([`/lists/${listId}`]);
 }

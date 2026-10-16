@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import { PlayerFrame } from "@/components/player/player-frame";
 import { PlayerProgressBridge } from "@/components/player/player-progress-bridge";
 import { SourcePicker } from "@/components/player/source-picker";
@@ -5,6 +6,7 @@ import { SiteHeader } from "@/components/site-header";
 import { getProgress } from "@/lib/library/queries";
 import { markWatched, saveProgress } from "@/lib/library/actions";
 import { currentUser } from "@/lib/session";
+import { RESUME_MIN_SECONDS } from "@/lib/player/progress";
 import { mediaSource } from "@/lib/media/runtime";
 import { pickStream, resolveAll } from "@/lib/sources";
 import type { TvDetail } from "@/lib/media/types";
@@ -42,7 +44,7 @@ export default async function WatchPage({
  );
 
  if (!isMovie && !isTv) return message(`Unknown media kind: ${kind}`);
- if (!Number.isInteger(tmdbId) || tmdbId <= 0) return message("Not a valid id.");
+ if (!Number.isInteger(tmdbId) || tmdbId <= 0) notFound();
  if (isTv && episode !== undefined && season === undefined) {
   return message("An episode needs a season.");
  }
@@ -50,13 +52,12 @@ export default async function WatchPage({
  const media = isMovie
   ? await mediaSource().movie(tmdbId)
   : await mediaSource().tv(tmdbId);
- if (!media) return message(`Nothing found for id ${tmdbId}.`);
+ if (!media) notFound();
 
  // Resuming three seconds in is worse than starting over: a
  // stored position below the floor is noise, not a resume
  // point, so it is deliberately dropped rather than passed.
- const RESUME_MIN_SECONDS = 30;
-
+ // The floor itself lives in lib/player/progress.
  const user = await currentUser();
  const stored = user
   ? await getProgress(
@@ -80,7 +81,12 @@ export default async function WatchPage({
   isTv ? episode : undefined,
   resumeSeconds,
  );
- const resolved = pickStream(options, query.source);
+ // An explicit `?source=` (a remembered choice, or a picker switch) wins;
+ // otherwise a stored position promotes a source that actually honours the
+ // resume hint, so the bridge mounts and the position is used.
+ const resolved = pickStream(options, query.source, {
+  preferResume: resumeSeconds !== undefined,
+ });
 
  // Only claim "resuming" when it is true: the active adapter must
  // honour startAtSeconds. vidlink and framextv ignore the hint,

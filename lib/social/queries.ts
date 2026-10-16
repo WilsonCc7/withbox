@@ -32,11 +32,21 @@ import type {
  UserSummary,
 } from "./types";
 import type { MediaRef } from "@/lib/library/types";
+import { chunkRefs } from "@/lib/library/queries";
 import type { MediaKind } from "@/lib/media/types";
 
 // Co-located with the query that returns it: the profile/reviews pages import
 // `getReviewsByUser` from here, so the type it returns lives here too.
 export type { ReviewWithRef };
+
+/**
+ * Policy caps, enforced by the server actions as silent no-ops. The follow cap
+ * is not cosmetic: the feed binds the viewer plus everyone they follow into one
+ * `inArray`, and D1 caps a statement at 100 bound parameters, so an unbounded
+ * follow list would make `/feed` fail outright.
+ */
+export const FOLLOW_LIMIT = 90;
+export const LIST_LIMIT = 100;
 
 /**
  * Keyset predicate for a `(timestamp, id)` cursor: strictly older rows, with
@@ -146,6 +156,9 @@ export async function getActivity(
   .select({ followingId: follow.followingId })
   .from(follow)
   .where(eq(follow.followerId, viewerId));
+ // The action cap keeps this list at FOLLOW_LIMIT rows: every source below
+ // binds `scope` into one `inArray`, and D1 allows 100 bound parameters per
+ // statement, so an unbounded list would break the feed rather than slow it.
  const scope = [viewerId, ...followed.map((row) => row.followingId)];
 
  const [watches, ratings, reviews, lists, likes] = await Promise.all([
@@ -341,28 +354,32 @@ export async function getListsByUser(
   .groupBy(list.id)
   .orderBy(desc(list.updatedAt));
 
- // One statement for the whole page: the cover thumb of each list is the
- // item at that list's minimum position.
+ // One statement per chunk: the cover thumb of each list is the item at that
+ // list's minimum position. Chunked because a user may own up to LIST_LIMIT
+ // lists and D1 caps a statement at 100 bound parameters.
  const listIds = rows.map((row) => row.id);
- const firstItems: { listId: string; kind: MediaKind; tmdbId: number }[] =
-  listIds.length === 0
-   ? []
-   : await getDb()
-    .select({
-     listId: listItem.listId,
-     kind: listItem.kind,
-     tmdbId: listItem.tmdbId,
-    })
-    .from(listItem)
-    .where(
-     and(
-      inArray(listItem.listId, listIds),
-      sql`${listItem.position} = (select min(i2.position) from list_item i2 where i2.listId = ${listItem.listId})`,
-     ),
-    )
-    // Two items can share the minimum position; the id makes the pick
-    // stable across loads instead of whatever the planner returns.
-    .orderBy(listItem.id);
+ const firstItems: { listId: string; kind: MediaKind; tmdbId: number }[] = (
+  await Promise.all(
+   chunkRefs(listIds).map((chunk) =>
+    getDb()
+     .select({
+      listId: listItem.listId,
+      kind: listItem.kind,
+      tmdbId: listItem.tmdbId,
+     })
+     .from(listItem)
+     .where(
+      and(
+       inArray(listItem.listId, chunk),
+       sql`${listItem.position} = (select min(i2.position) from list_item i2 where i2.listId = ${listItem.listId})`,
+      ),
+     )
+     // Two items can share the minimum position; the id makes the pick
+     // stable across loads instead of whatever the planner returns.
+     .orderBy(listItem.id),
+   ),
+  )
+ ).flat();
  const firstByList = Object.fromEntries(
   firstItems.map(
    (item): [string, MediaRef] => [

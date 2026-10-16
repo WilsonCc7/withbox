@@ -3,9 +3,11 @@ import { cache } from "react";
 import { getAuth } from "./auth";
 
 export interface SessionUser {
- id: string;
- email: string;
- name: string;
+  id: string;
+  email: string;
+  name: string;
+  /** Avatar URL, or null for the initials fallback. */
+  image: string | null;
 }
 
 /**
@@ -22,5 +24,5 @@ export const currentUser = cache(async (): Promise<SessionUser | null> => {
  const result = await getAuth().api.getSession({ headers: await headers() });
  if (!result) return null;
  const { user } = result;
- return { id: user.id, email: user.email, name: user.name ?? "" };
+ return { id: user.id, email: user.email, name: user.name ?? "", image: user.image ?? null };
 });

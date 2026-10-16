@@ -5,9 +5,11 @@ import { env } from "./env";
  * The authenticated user, as far as this app cares.
  */
 export interface AuthUser {
- id: string;
- email: string;
- name?: string | null;
+  id: string;
+  email: string;
+  name?: string | null;
+  /** Better Auth's core avatar column (`db/schema.ts`), present but nullable. */
+  image?: string | null;
 }
 
 export interface AuthSession {

@@ -194,31 +194,23 @@ export async function markWatched(formData: FormData): Promise<void> {
   .limit(1);
 
  if (existing.length === 0) {
-  await db.insert(watchEntry).values({
-   id: crypto.randomUUID(),
-   userId: user.id,
-   kind,
-   tmdbId,
-   season,
-   episode,
-   watchedAt: new Date(),
-  });
+  await db
+   .insert(watchEntry)
+   .values({
+    id: crypto.randomUUID(),
+    userId: user.id,
+    kind,
+    tmdbId,
+    season,
+    episode,
+    watchedAt: new Date(),
+   })
+   // `watch_entry` carries no unique index on purpose (repeat rows are
+   // rewatches), so nothing can conflict here — the clause is belt and
+   // braces, kept so every read-then-write insert in this file has the
+   // same shape.
+   .onConflictDoNothing();
  }
-
- await revalidatePaths(pathsForMedia(user.id, kind, tmdbId));
-}
-
-/** Removal counterpart to `markWatched`; used when a mark was set by mistake. */
-export async function unmarkWatched(formData: FormData): Promise<void> {
- const user = await requireUser();
- const kind = parseKind(formData.get("kind"));
- const tmdbId = parseTmdbId(formData.get("tmdbId"));
- const season = parseOptionalNonNegativeInt(formData.get("season"), "season");
- const episode = parseOptionalNonNegativeInt(formData.get("episode"), "episode");
-
- await getDb()
-  .delete(watchEntry)
-  .where(and(...watchKey(user.id, kind, tmdbId, season, episode)));
 
  await revalidatePaths(pathsForMedia(user.id, kind, tmdbId));
 }
@@ -251,15 +243,20 @@ async function upsertRating(
     and(eq(rating.userId, userId), eq(rating.kind, kind), eq(rating.tmdbId, tmdbId)),
    );
  } else {
-  await db.insert(rating).values({
-   id: crypto.randomUUID(),
-   userId,
-   kind,
-   tmdbId,
-   value,
-   createdAt: now,
-   updatedAt: now,
-  });
+  await db
+   .insert(rating)
+   .values({
+    id: crypto.randomUUID(),
+    userId,
+    kind,
+    tmdbId,
+    value,
+    createdAt: now,
+    updatedAt: now,
+   })
+   // Read-then-write: two overlapping submissions can both miss the row
+   // and then collide on (userId, kind, tmdbId).
+   .onConflictDoNothing();
  }
 }
 
@@ -292,16 +289,19 @@ async function upsertReview(
     and(eq(review.userId, userId), eq(review.kind, kind), eq(review.tmdbId, tmdbId)),
    );
  } else {
-  await db.insert(review).values({
-   id: crypto.randomUUID(),
-   userId,
-   kind,
-   tmdbId,
-   body,
-   containsSpoilers,
-   createdAt: now,
-   updatedAt: now,
-  });
+  await db
+   .insert(review)
+   .values({
+    id: crypto.randomUUID(),
+    userId,
+    kind,
+    tmdbId,
+    body,
+    containsSpoilers,
+    createdAt: now,
+    updatedAt: now,
+   })
+   .onConflictDoNothing();
  }
 }
 
@@ -383,13 +383,16 @@ export async function toggleWatchlist(formData: FormData): Promise<void> {
     ),
    );
  } else {
-  await db.insert(watchlistItem).values({
-   id: crypto.randomUUID(),
-   userId: user.id,
-   kind,
-   tmdbId,
-   addedAt: new Date(),
-  });
+  await db
+   .insert(watchlistItem)
+   .values({
+    id: crypto.randomUUID(),
+    userId: user.id,
+    kind,
+    tmdbId,
+    addedAt: new Date(),
+   })
+   .onConflictDoNothing();
  }
  await revalidatePaths(pathsForMedia(user.id, kind, tmdbId));
 }
@@ -442,6 +445,11 @@ export async function markSeason(formData: FormData): Promise<void> {
  * a malformed value reports `malformed` and the action returns
  * silently. An absent optional field parses to `null` ("not
  * applicable"), matching the watch-entry parsers above.
+ *
+ * Deliberately not integer-only: the timer reports fractional seconds
+ * (`currentTime = 12.5`), and rejecting them dropped the write
+ * entirely. Rounding happens in `saveProgress`, at the storage
+ * boundary, because the columns are integers.
  */
 function parseProgressField(
  raw: FormDataEntryValue | null,
@@ -449,7 +457,7 @@ function parseProgressField(
  const trimmed = String(raw ?? "").trim();
  if (trimmed === "") return { value: null, malformed: false };
  const value = Number(trimmed);
- if (!Number.isInteger(value) || value < 0) {
+ if (!Number.isFinite(value) || value < 0) {
   return { value: null, malformed: true };
  }
  return { value, malformed: false };
@@ -477,7 +485,7 @@ export async function saveProgress(formData: FormData): Promise<void> {
  if (
   tmdbId.malformed ||
   tmdbId.value === null ||
-  tmdbId.value <= 0 ||
+  tmdbId.value < 1 ||
   position.malformed ||
   position.value === null
  ) {
@@ -489,6 +497,15 @@ export async function saveProgress(formData: FormData): Promise<void> {
  const duration = parseProgressField(formData.get("duration"));
  if (season.malformed || episode.malformed || duration.malformed) return;
 
+ // Round at the storage boundary: the columns are integers but the timer
+ // reports fractional seconds, and `slotKey` must be built from the same
+ // rounded id that is stored or the upsert would key on a different slot.
+ const tmdbIdInt = Math.round(tmdbId.value);
+ const seasonInt = season.value === null ? null : Math.round(season.value);
+ const episodeInt = episode.value === null ? null : Math.round(episode.value);
+ const positionSeconds = Math.round(position.value);
+ const durationSeconds = duration.value === null ? null : Math.round(duration.value);
+
  const db = getDb();
  await db
   .insert(playbackProgress)
@@ -496,19 +513,19 @@ export async function saveProgress(formData: FormData): Promise<void> {
    id: crypto.randomUUID(),
    userId: user.id,
    kind,
-   tmdbId: tmdbId.value,
-   season: season.value,
-   episode: episode.value,
-   slotKey: progressSlot(kind, tmdbId.value, season.value, episode.value),
-   positionSeconds: position.value,
-   durationSeconds: duration.value,
+   tmdbId: tmdbIdInt,
+   season: seasonInt,
+   episode: episodeInt,
+   slotKey: progressSlot(kind, tmdbIdInt, seasonInt, episodeInt),
+   positionSeconds,
+   durationSeconds,
    updatedAt: new Date(),
   })
   .onConflictDoUpdate({
    target: [playbackProgress.userId, playbackProgress.slotKey],
    set: {
-    positionSeconds: position.value,
-    durationSeconds: duration.value,
+    positionSeconds,
+    durationSeconds,
     updatedAt: new Date(),
    },
   });
@@ -652,23 +669,32 @@ export async function toggleLiked(formData: FormData): Promise<void> {
     ),
    );
  } else {
-  await db.insert(mediaLike).values({
-   id: crypto.randomUUID(),
-   userId: user.id,
-   kind,
-   tmdbId,
-   createdAt: new Date(),
-  });
+  await db
+   .insert(mediaLike)
+   .values({
+    id: crypto.randomUUID(),
+    userId: user.id,
+    kind,
+    tmdbId,
+    createdAt: new Date(),
+   })
+   .onConflictDoNothing();
  }
  await revalidatePaths(pathsForMedia(user.id, kind, tmdbId));
 }
 
 /**
- * Pins a title to one of four profile slots. Clicking an already-pinned
- * title unpins it; otherwise the slot's current occupant (if any) and
- * the title's old slot are cleared and the row inserted — in one
- * `db.batch`, because `favorite_user_position` is UNIQUE and D1 has no
- * interactive transactions. `db.batch` is atomic on D1.
+ * Pins a title to one of four profile slots.
+ *
+ * - Clicking the slot it already occupies unpins it.
+ * - Picking a *different* slot moves the row there, clearing that slot's
+ *   previous occupant first.
+ * - Not pinned at all: insert at the requested slot.
+ *
+ * Every write is one `db.batch`, because `favorite_user_position` is
+ * UNIQUE and D1 has no interactive transactions (`begin`/`commit` are
+ * rejected). A batch runs its statements sequentially inside one
+ * transaction, so the unique index never sees two rows at `slot`.
  */
 export async function setFavorite(formData: FormData): Promise<void> {
  const user = await requireUser();
@@ -691,8 +717,9 @@ export async function setFavorite(formData: FormData): Promise<void> {
    ),
   )
   .limit(1);
+ const current = existing[0];
 
- if (existing.length > 0) {
+ if (current && current.position === slot) {
   await db
    .delete(favorite)
    .where(
@@ -702,6 +729,23 @@ export async function setFavorite(formData: FormData): Promise<void> {
      eq(favorite.tmdbId, tmdbId),
     ),
    );
+ } else if (current) {
+  // Move: clear whoever holds the target slot, then reposition this row.
+  await db.batch([
+   db
+    .delete(favorite)
+    .where(and(eq(favorite.userId, user.id), eq(favorite.position, slot))),
+   db
+    .update(favorite)
+    .set({ position: slot })
+    .where(
+     and(
+      eq(favorite.userId, user.id),
+      eq(favorite.kind, kind),
+      eq(favorite.tmdbId, tmdbId),
+     ),
+    ),
+  ]);
  } else {
   await db.batch([
    db
@@ -719,14 +763,17 @@ export async function setFavorite(formData: FormData): Promise<void> {
       eq(favorite.tmdbId, tmdbId),
      ),
     ),
-   db.insert(favorite).values({
-    id: crypto.randomUUID(),
-    userId: user.id,
-    kind,
-    tmdbId,
-    position: slot,
-    createdAt: new Date(),
-   }),
+   db
+    .insert(favorite)
+    .values({
+     id: crypto.randomUUID(),
+     userId: user.id,
+     kind,
+     tmdbId,
+     position: slot,
+     createdAt: new Date(),
+    })
+    .onConflictDoNothing(),
   ]);
  }
 

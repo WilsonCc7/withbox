@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import { EpisodeMarker } from "@/components/library/episode-marker";
 import { MarkSeasonForm } from "@/components/library/mark-season-form";
 import { SiteHeader } from "@/components/site-header";
@@ -22,16 +23,7 @@ export default async function SeasonPage({
   const show = invalid ? null : await mediaSource().tv(tmdbId);
   const episodes = show ? await mediaSource().episodes(tmdbId, seasonNumber) : [];
 
-  if (!show) {
-    return (
-      <>
-        <SiteHeader />
-        <main className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
-          <h1 className="text-xl">No series with id {id}.</h1>
-        </main>
-      </>
-    );
-  }
+  if (!show) notFound();
 
   const season = show.seasons.find((s) => s.seasonNumber === seasonNumber);
 

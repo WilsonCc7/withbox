@@ -1,6 +1,6 @@
+import { AccountMenu } from "@/components/account-menu";
 import { BottomTabBar } from "@/components/bottom-tab-bar";
 import { SearchBox } from "@/components/search-box";
-import { SignOutButton } from "@/components/sign-out-button";
 import { currentUser } from "@/lib/session";
 
 export async function SiteHeader({ defaultQuery = "" }: { defaultQuery?: string }) {
@@ -42,10 +42,7 @@ export async function SiteHeader({ defaultQuery = "" }: { defaultQuery?: string 
           </div>
 
           {user ? (
-            <div className="flex items-center gap-3 text-sm">
-              <span className="hidden text-muted sm:inline">{user.name}</span>
-              <SignOutButton />
-            </div>
+            <AccountMenu user={{ id: user.id, name: user.name, image: user.image }} />
           ) : (
             <a className="text-sm text-accent hover:text-accent-hi" href="/sign-in">
               Sign in

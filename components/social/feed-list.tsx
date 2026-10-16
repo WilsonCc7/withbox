@@ -14,21 +14,29 @@ export function FeedList({
   const [rows, setRows] = useState(initialRows);
   const [cursor, setCursor] = useState(initialNext);
   const [pending, setPending] = useState(false);
+  const [error, setError] = useState(false);
 
   async function loadMore() {
     if (!cursor || pending) return;
     setPending(true);
+    setError(false);
     try {
       const res = await fetch(`/api/feed?before=${encodeURIComponent(cursor)}`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        setError(true);
+        return;
+      }
       const data = (await res.json()) as {
         rows: FeedRow[];
         next: string | null;
       };
       setRows((prev) => [...prev, ...data.rows]);
       setCursor(data.next);
+    } catch {
+      setError(true);
     } finally {
-      // Restores the button on failure too; list and cursor stay untouched.
+      // Clears pending on failure too; list and cursor stay untouched, and the
+      // `error` flag swaps the button for a Retry.
       setPending(false);
     }
   }
@@ -49,14 +57,27 @@ export function FeedList({
       </ul>
       {cursor && (
         <div className="mt-6 flex items-center gap-4">
-          <button
-            type="button"
-            onClick={loadMore}
-            disabled={pending}
-            className={`text-sm text-accent hover:text-accent-hi${pending ? " opacity-60" : ""}`}
-          >
-            Load more
-          </button>
+          {error ? (
+            <p className="text-sm text-danger">
+              Couldn&apos;t load more.{" "}
+              <button
+                className="cursor-pointer text-accent hover:text-accent-hi"
+                onClick={loadMore}
+                type="button"
+              >
+                Retry
+              </button>
+            </p>
+          ) : (
+            <button
+              type="button"
+              onClick={loadMore}
+              disabled={pending}
+              className={`cursor-pointer text-sm text-accent hover:text-accent-hi${pending ? " opacity-60" : ""}`}
+            >
+              Load more
+            </button>
+          )}
           {/* No-JS path: the button needs JS, this link renders the next page server-side. */}
           <a
             className="text-sm text-accent hover:text-accent-hi"

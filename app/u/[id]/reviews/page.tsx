@@ -105,6 +105,9 @@ export default async function UserReviewsPage({
           )
         ) : (
           <>
+            {details.every((detail) => detail === null) && (
+              <p className="text-muted">These titles could not be loaded right now.</p>
+            )}
             <div>
               {items.map((review, i) => {
                 const detail = details[i] ?? null;

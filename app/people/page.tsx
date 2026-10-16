@@ -1,6 +1,11 @@
 import { FollowButton } from "@/components/social/follow-button";
 import { SiteHeader } from "@/components/site-header";
-import { getFollowCounts, isFollowing, listUsers } from "@/lib/social/queries";
+import {
+  FOLLOW_LIMIT,
+  getFollowCounts,
+  isFollowing,
+  listUsers,
+} from "@/lib/social/queries";
 import { currentUser } from "@/lib/session";
 
 const PAGE_SIZE = 50;
@@ -71,6 +76,8 @@ export default async function PeoplePage({
     );
   }
 
+  const viewerCounts = await getFollowCounts(viewer.id);
+
   // One parallel fan-out: follow state and follower counts per
   // user, resolved together instead of sequential awaits per row.
   const details = await Promise.all(
@@ -84,6 +91,11 @@ export default async function PeoplePage({
       <SiteHeader />
       <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
         <h1 className="mb-6 text-xl font-semibold">People</h1>
+        {viewerCounts.following >= FOLLOW_LIMIT && (
+          <p className="mb-4 text-muted">
+            You&apos;re at the following limit ({FOLLOW_LIMIT}).
+          </p>
+        )}
         <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-surface">
           {users.map((person, i) => {
             const [following, counts] = details[i];
