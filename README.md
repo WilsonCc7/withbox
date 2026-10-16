@@ -143,20 +143,25 @@ Add the returned UUID to the binding:
 DB: bindings.d1({ name: "withbox", id: "your-database-uuid" }),
 ```
 
-**2. Upload the secrets.** `TMDB_API_KEY` and `BETTER_AUTH_SECRET` are `bindings.secret()`
-and must exist on the Worker — they are not read from `.dev.vars` in production:
+**2. Supply the secrets on the *first* deploy.** `TMDB_API_KEY` and `BETTER_AUTH_SECRET` are
+`bindings.secret()` and are not read from `.dev.vars` in production. A Worker that does not
+exist yet has nowhere to hold secrets, so `cf deploy` refuses the deployment outright
+(`The following required secrets have not been set`). Carry them with the first upload
+instead — `.env` format, one `NAME=value` per line:
 
 ```sh
-pnpm exec cf workers secrets update TMDB_API_KEY
-pnpm exec cf workers secrets update BETTER_AUTH_SECRET
+pnpm exec cf deploy --prebuilt --secrets-file ./secrets.env
+rm ./secrets.env          # delete immediately; never commit it
 ```
 
-**3. Build for your host and deploy.** `BETTER_AUTH_URL` must equal the public origin, and
-it is baked into the artifact at build time:
+**3. Build for your host and deploy.** `BETTER_AUTH_URL` must equal the public origin and is
+baked into the artifact at build time, so build and deploy in one breath:
 
 ```sh
-WITHBOX_BASE_URL=https://your-domain.example pnpm run deploy
+env -u WITHBOX_TMDB_MODE WITHBOX_BASE_URL=https://your-domain.example pnpm run deploy
 ```
+
+Once the Worker exists, later secret rotations use `pnpm exec cf workers secrets update <NAME>`.
 
 Then apply the migrations to the remote database. The positional is the **database ID**
 (UUID), not the binding name — get it from `pnpm exec cf d1 list`. `--dir drizzle` is also
