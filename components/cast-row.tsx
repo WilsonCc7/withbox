@@ -4,10 +4,10 @@ import type { CastMember, CreatedBy, CrewMember } from "@/lib/media/types";
 /**
  * Cast list plus the film's director or the series' creators.
  *
- * A horizontally scrollable strip on phones (a 6-column grid would shrink
- * portraits below the point of recognition) and a grid from `sm` up. Renders
- * nothing when the transport could not supply credits — a fixture-mode build
- * shows no empty section.
+ * One fixed row — 8 / 6 / 4 columns by breakpoint — so the portraits never
+ * scroll sideways. The heading lives here rather than in the pages so the
+ * emptiness check below covers it: a fixture-mode build, which returns no
+ * credits, shows no orphan "Cast" heading.
  */
 export function CastRow({
   cast,
@@ -29,14 +29,16 @@ export function CastRow({
 
   return (
     <section className="mt-8">
+      <h2 className="mb-4 text-xl font-semibold">Cast</h2>
+
       {byline.length > 0 && (
-        <p className="text-sm text-muted">
+        <p className="mb-3 text-sm text-muted">
           {bylineLabel} <span className="text-fg">{byline.map((p) => p.name).join(", ")}</span>
         </p>
       )}
 
       {cast.length > 0 && (
-        <div className="scrollbar-none mt-3 flex snap-x gap-3 overflow-x-auto pb-2 sm:grid sm:grid-cols-4 sm:gap-4 sm:overflow-visible lg:grid-cols-6">
+        <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 sm:gap-3 lg:grid-cols-8">
           {cast.map((member, index) => {
             const photo = imageUrl(member.profilePath, "w185");
             const initials = member.name
@@ -46,7 +48,7 @@ export function CastRow({
               .map((part) => part.charAt(0).toUpperCase())
               .join("");
             return (
-              <div className="w-24 shrink-0 snap-start sm:w-auto" key={`${member.tmdbId}-${index}`}>
+              <div className="w-full" key={`${member.tmdbId}-${index}`}>
                 <div className="aspect-[2/3] w-full overflow-hidden rounded-md bg-surface-hi">
                   {photo ? (
                     <img

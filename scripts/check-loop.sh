@@ -1033,6 +1033,82 @@ CODE=$(curl -s -m 15 "$BASE/movie/0" -o /tmp/nf.html -w '%{http_code}')
 body /tmp/nf.html | grep -q "Not found." || fail "/movie/0 does not render the app's not-found page"
 echo "ok  an unknown title renders the app-owned not-found page"
 
+# --- CSV import ----------------------------------------------------------
+# Signed out it is a gated page like /diary.
+curl -s -m 15 "$BASE/settings/import" -o /tmp/imp-out.html
+grep -qE 'sign-in\?next=(%2F|/)settings/import' /tmp/imp-out.html \
+  || fail "/settings/import does not link to /sign-in?next=/settings/import"
+
+ACTJAR="$JAR"
+curl -s -m 15 "$BASE/settings/import" -b "$JAR" -o /tmp/imp.html
+IMP=$(action_for /tmp/imp.html importLibrary)
+[[ -n "$IMP" ]] || fail "no importLibrary action on /settings/import"
+
+# One Letterboxd row for a title this fixture catalogue has and this user has
+# never logged. Inception is fixture id 27205, release year 2010.
+printf 'Date,Name,Year,Letterboxd URI\n2011-03-08,Inception,2010,https://boxd.it/x\n' > /tmp/watched.csv
+curl -s -m 15 "$BASE/diary" -b "$JAR" -o /tmp/diary-before.html
+BEFORE=$(count_rows /tmp/diary-before.html)
+
+STATUS=$(curl -s -m 60 -X POST "$BASE/settings/import" -b "$JAR" -c "$JAR" \
+  -H "Origin: $BASE" -F "$IMP=" -F "file=@/tmp/watched.csv;type=text/csv" \
+  -o /dev/null -w '%{http_code}')
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "importLibrary returned $STATUS"
+
+curl -s -m 15 "$BASE/diary" -b "$JAR" -o /tmp/diary-after.html
+AFTER=$(count_rows /tmp/diary-after.html)
+[[ "$AFTER" == "$((BEFORE + 1))" ]] \
+  || fail "importing one row added $((AFTER - BEFORE)) diary rows, expected exactly 1"
+body /tmp/diary-after.html | grep -q "Inception" || fail "the imported title is not on /diary"
+body /tmp/diary-after.html | grep -q "2011-03-08" || fail "the imported watch date is not on /diary"
+curl -s -m 15 "$BASE/watched" -b "$JAR" -o /tmp/watched-import.html
+body /tmp/watched-import.html | grep -q "Inception" || fail "/watched does not list the imported title"
+
+# Re-running the identical file must add nothing: an import is repaired by
+# running it again, not by hand-deleting rows first.
+STATUS=$(curl -s -m 60 -X POST "$BASE/settings/import" -b "$JAR" -c "$JAR" \
+  -H "Origin: $BASE" -F "$IMP=" -F "file=@/tmp/watched.csv;type=text/csv" \
+  -o /dev/null -w '%{http_code}')
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "the second import returned $STATUS"
+curl -s -m 15 "$BASE/diary" -b "$JAR" -o /tmp/diary-rerun.html
+RERUN=$(count_rows /tmp/diary-rerun.html)
+[[ "$RERUN" == "$AFTER" ]] || fail "a second identical import added $((RERUN - AFTER)) rows"
+
+# A title the catalogue does not have is REPORTED, never invented. The action
+# redirects with its counts, and React carries that on the action response.
+printf 'Date,Name,Year,Letterboxd URI\n2011-03-09,Nonexistent Film,1999,https://boxd.it/y\n' > /tmp/missing.csv
+STATUS=$(curl -s -m 60 -X POST "$BASE/settings/import" -b "$JAR" -c "$JAR" \
+  -H "Origin: $BASE" -F "$IMP=" -F "file=@/tmp/missing.csv;type=text/csv" \
+  -D /tmp/imp-head.txt -o /dev/null -w '%{http_code}')
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "the unmatched import returned $STATUS"
+grep -q 'missing=1' /tmp/imp-head.txt \
+  || fail "an unmatched title is not reported back to the user"
+echo "ok  CSV import adds exactly one row, is idempotent on a re-run, and reports misses"
+
+# --- the stats page ------------------------------------------------------
+# Signed out it is a gated page like /diary, and the prompt must carry the
+# way in for a no-JS visitor.
+curl -s -m 15 "$BASE/stats" -o /tmp/stats-out.html
+body /tmp/stats-out.html | grep -q "to see your stats" \
+  || fail "/stats shows no sign-in prompt when signed out"
+grep -qE 'sign-in\?next=(%2F|/)stats' /tmp/stats-out.html \
+  || fail "/stats does not link to /sign-in?next=/stats"
+
+# Signed in, every figure is derived from the rows this run created: a film
+# watched and rated, a 2020-05-04 diary entry, a whole season of episodes.
+ACTJAR="$JAR"
+CODE=$(curl -s -m 30 "$BASE/stats" -b "$JAR" -o /tmp/stats-in.html -w '%{http_code}')
+[[ "$CODE" == "200" ]] || fail "/stats returned $CODE signed in"
+body /tmp/stats-in.html | grep -q "Films" || fail "/stats renders no Films figure"
+body /tmp/stats-in.html | grep -q "2020" \
+  || fail "/stats renders no year row for the logged 2020 diary entry"
+
+# ?year= must narrow the date-scoped numbers rather than error.
+CODE=$(curl -s -m 30 "$BASE/stats?year=2020" -b "$JAR" -o /tmp/stats-2020.html -w '%{http_code}')
+[[ "$CODE" == "200" ]] || fail "/stats?year=2020 returned $CODE"
+body /tmp/stats-2020.html | grep -q "Films" || fail "/stats?year=2020 renders no figures"
+echo "ok  /stats derives its figures, honours ?year=, and gates signed-out callers"
+
 unset ACTJAR
 rm -f "$JAR2"
 

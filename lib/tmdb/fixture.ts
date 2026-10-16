@@ -21,6 +21,7 @@ import type {
   TrendingWindow,
   TvDetail,
 } from "@/lib/media/types";
+import type { MediaRef } from "@/lib/library/types";
 import * as map from "./map";
 import fixtureData from "./fixtures/data.json";
 
@@ -124,6 +125,16 @@ export function createFixtureSource(): MediaSource {
 
     async credits(): Promise<Credits> {
       return { cast: [], crew: [] };
+    },
+
+    async recommendations(): Promise<MediaSummary[]> {
+      // The fixture catalogue is a fixed set with no recommendation graph.
+      return [];
+    },
+
+    async findByImdbId(): Promise<MediaRef | null> {
+      // Fixture records carry no IMDb ids, so import matches by title+year.
+      return null;
     },
   };
 }

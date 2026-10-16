@@ -1,6 +1,17 @@
 @import "tailwindcss";
 
 /*
+ * Self-hosted because next/font is a vinext gap; one variable file covers
+ * 300-700, and the latin subset is all the UI needs.
+ */
+@font-face {
+  font-family: "Space Grotesk";
+  src: url("/fonts/space-grotesk-latin-var.woff2") format("woff2");
+  font-weight: 300 700;
+  font-display: swap;
+}
+
+/*
  * Withbox theme.
  *
  * Letterboxd's information architecture, not its palette: dark, dense, poster
@@ -13,41 +24,103 @@
   --color-border: #2a3442;
   --color-fg: #e9eff6;
   --color-muted: #94a3b4;
-  --color-faint: #6b7a8c;
+  /* 5.99:1 on bg, 5.44:1 on surface, 4.84:1 on surface-hi. It carries 12px
+   * card meta, so it has to clear 4.5:1 on all three. */
+  --color-faint: #8394a6;
   --color-accent: #f0a02a;
   --color-accent-hi: #ffb84d;
   --color-danger: #e5484d;
 
+  /* Rating-chip surfaces: dark ink on saturated colour, never the reverse
+   * (white on the RT red is 3.80:1). */
+  --color-imdb: #f5c518;
+  --color-rt-fresh: #01b137;
+  --color-rt-rotten: #fa320a;
+  --color-on-chip: #0b0f14;
+
   --font-sans:
     ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Space Grotesk", var(--font-sans);
 
-  --radius-card: 0.5rem;
+  --radius-card: 0.75rem;
+  --radius-control: 0.5rem;
+
+  /* Fixed rem scale, ~1.2 ratio. Sizes live here only, so every page moves
+   * together. */
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.5;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.5;
+  --text-base: 1rem;
+  --text-base--line-height: 1.5;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.4;
+  --text-xl: 1.375rem;
+  --text-xl--line-height: 1.3;
+  --text-2xl: 1.75rem;
+  --text-2xl--line-height: 1.2;
+  --text-3xl: 2.25rem;
+  --text-3xl--line-height: 1.1;
+  --text-display: 3rem;
+  --text-display--line-height: 1.05;
 }
 
-:root {
-  color-scheme: dark;
+/*
+ * Every element rule lives in Tailwind's `base` layer.
+ *
+ * This is not tidiness. Unlayered CSS beats *every* layer in the cascade, so
+ * an unlayered `a { color: inherit }` silently killed each `text-*` utility on
+ * an anchor: links rendered in body colour, `text-accent` did nothing, and the
+ * Play CTA drew #e9eff6 on #f0a02a — 1.9:1, a real failure. Inside `base`, the
+ * utilities layer wins again.
+ */
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html {
+    background: var(--color-bg);
+    caret-color: var(--color-accent);
+    scrollbar-color: var(--color-border) var(--color-bg);
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  *:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
 }
 
-html {
-  background: var(--color-bg);
+::selection {
+  background: color-mix(in oklab, var(--color-accent) 35%, transparent);
 }
 
-body {
-  margin: 0;
-  background: var(--color-bg);
-  color: var(--color-fg);
-  font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
-}
-
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-*:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
+/* Ratings, counts and player clocks: digits that do not shift the layout. */
+.tnum {
+  font-variant-numeric: tabular-nums;
 }
 
 /* Scrollable rows (mobile nav, cast strip): scroll, but no visible bar. */

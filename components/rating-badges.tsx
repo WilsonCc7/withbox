@@ -22,9 +22,8 @@ export function RatingBadges({
   if (imdb === null && rt === null && tmdbScore === null) return null;
 
   const chip =
-    size === "sm"
-      ? "inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-semibold"
-      : "inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-xs font-semibold";
+    "inline-flex items-center gap-0.5 whitespace-nowrap rounded-[var(--radius-control)] text-xs font-semibold " +
+    (size === "sm" ? "px-1.5 py-0.5" : "px-2 py-1");
   const tomato = size === "sm" ? "h-2.5 w-2.5" : "h-3 w-3";
 
   const score = tmdbScore === null ? null : tmdbScore.toFixed(1);
@@ -34,7 +33,7 @@ export function RatingBadges({
       {imdb !== null && (
         <span
           aria-label={`IMDb ${imdb.toFixed(1)}`}
-          className={`${chip} bg-[#f5c518] text-black`}
+          className={`${chip} bg-[var(--color-imdb)] text-[var(--color-on-chip)]`}
           role="img"
           title="IMDb rating"
         >
@@ -48,7 +47,11 @@ export function RatingBadges({
       {rt !== null && (
         <span
           aria-label={`Rotten Tomatoes ${rt}%`}
-          className={`${chip} bg-bg/85 ${rt >= 60 ? "text-[#01b137]" : "text-[#fa320a]"}`}
+          className={`${chip} ${
+            rt >= 60
+              ? "bg-[var(--color-rt-fresh)] text-[var(--color-on-chip)]"
+              : "bg-[var(--color-rt-rotten)] text-[var(--color-on-chip)]"
+          }`}
           role="img"
           title="Rotten Tomatoes"
         >

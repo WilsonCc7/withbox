@@ -8,6 +8,7 @@ export function PosterGrid({
   heading,
   ratings,
   states,
+  emptyHint,
 }: {
   items: MediaSummary[];
   heading?: string;
@@ -15,6 +16,8 @@ export function PosterGrid({
   ratings?: Map<string, MediaRatings>;
   /** Keyed by `mediaKey`; absent when signed out. */
   states?: Map<string, { watched: boolean; inWatchlist: boolean }>;
+  /** One line telling the user what to do next; shown under the empty copy. */
+  emptyHint?: string;
 }) {
   return (
     <section>
@@ -24,6 +27,7 @@ export function PosterGrid({
       {items.length === 0 ? (
         <div className="rounded-[var(--radius-card)] border border-dashed border-border bg-surface px-6 py-12 text-center text-sm text-muted">
           Nothing here yet.
+          {emptyHint && <p className="mt-2 text-xs text-faint">{emptyHint}</p>}
         </div>
       ) : (
         <ul className="grid grid-cols-2 gap-3 min-[480px]:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">

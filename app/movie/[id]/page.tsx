@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { CastRow } from "@/components/cast-row";
 import { MediaLibraryPanel } from "@/components/media-library-panel";
+import { PosterGrid } from "@/components/poster-grid";
 import { RatingBadges } from "@/components/rating-badges";
 import { SiteHeader } from "@/components/site-header";
 import { AddToListPicker } from "@/components/social/list-toolbar";
@@ -47,21 +48,29 @@ export default async function MoviePage({ params }: { params: Promise<{ id: stri
   const ref = { kind: "movie" as const, tmdbId };
   // One round trip for all post-detail work; per-user queries are
   // skipped entirely when signed out.
-  const [ratings, credits, watchState, inWatchlist, liked, favorites] =
-    await Promise.all([
-      getRatings(source, ref),
-      source.credits("movie", tmdbId),
-      user ? getWatchState(user.id, ref) : null,
-      user ? isInWatchlist(user.id, ref) : false,
-      user ? isLiked(user.id, "movie", tmdbId) : false,
-      user ? getFavorites(user.id) : [],
-    ]);
+  const [
+    ratings,
+    credits,
+    recommendations,
+    watchState,
+    inWatchlist,
+    liked,
+    favorites,
+  ] = await Promise.all([
+    getRatings(source, ref),
+    source.credits("movie", tmdbId),
+    source.recommendations("movie", tmdbId),
+    user ? getWatchState(user.id, ref) : null,
+    user ? isInWatchlist(user.id, ref) : false,
+    user ? isLiked(user.id, "movie", tmdbId) : false,
+    user ? getFavorites(user.id) : [],
+  ]);
   const lists = user ? await getListsByUser(user.id) : [];
 
   return (
     <>
       <SiteHeader />
-      <main className="mx-auto max-w-6xl px-4 pb-8 sm:px-6">
+      <main className="mx-auto max-w-6xl px-4 pt-6 pb-8 sm:px-6">
         <div className="relative mb-6 h-48 overflow-hidden rounded-lg bg-surface sm:h-64">
           {backdrop && (
             <img
@@ -91,7 +100,7 @@ export default async function MoviePage({ params }: { params: Promise<{ id: stri
 
           <div className="min-w-0">
             <p className="text-xs uppercase tracking-wide text-accent">Film</p>
-            <h1 className="mt-1 text-2xl font-semibold leading-tight sm:text-3xl">
+            <h1 className="font-display mt-1 text-2xl font-semibold leading-tight sm:text-3xl">
               {movie.title}
               {movie.year && <span className="ml-2 font-normal text-muted">{movie.year}</span>}
             </h1>
@@ -157,6 +166,14 @@ export default async function MoviePage({ params }: { params: Promise<{ id: stri
         )}
 
         <CastRow cast={credits.cast} crew={credits.crew} />
+
+        {/* No `states`/`ratings`: the page holds no card-state map, and
+            browse grids deliberately carry no OMDb scores. */}
+        {recommendations.length > 0 && (
+          <div className="mt-10">
+            <PosterGrid heading="More like this" items={recommendations} />
+          </div>
+        )}
       </main>
     </>
   );

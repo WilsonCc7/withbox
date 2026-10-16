@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { CastRow } from "@/components/cast-row";
 import { MediaLibraryPanel } from "@/components/media-library-panel";
+import { PosterGrid } from "@/components/poster-grid";
 import { RatingBadges } from "@/components/rating-badges";
 import { SiteHeader } from "@/components/site-header";
 import { AddToListPicker } from "@/components/social/list-toolbar";
@@ -45,21 +46,29 @@ export default async function TvPage({ params }: { params: Promise<{ id: string 
   const ref = { kind: "tv" as const, tmdbId };
   // One round trip for all post-detail work; per-user queries are
   // skipped entirely when signed out.
-  const [ratings, credits, watchState, inWatchlist, liked, favorites] =
-    await Promise.all([
-      getRatings(source, ref),
-      source.credits("tv", tmdbId),
-      user ? getWatchState(user.id, ref) : null,
-      user ? isInWatchlist(user.id, ref) : false,
-      user ? isLiked(user.id, "tv", tmdbId) : false,
-      user ? getFavorites(user.id) : [],
-    ]);
+  const [
+    ratings,
+    credits,
+    recommendations,
+    watchState,
+    inWatchlist,
+    liked,
+    favorites,
+  ] = await Promise.all([
+    getRatings(source, ref),
+    source.credits("tv", tmdbId),
+    source.recommendations("tv", tmdbId),
+    user ? getWatchState(user.id, ref) : null,
+    user ? isInWatchlist(user.id, ref) : false,
+    user ? isLiked(user.id, "tv", tmdbId) : false,
+    user ? getFavorites(user.id) : [],
+  ]);
   const lists = user ? await getListsByUser(user.id) : [];
 
   return (
     <>
       <SiteHeader />
-      <main className="mx-auto max-w-6xl px-4 pb-8 sm:px-6">
+      <main className="mx-auto max-w-6xl px-4 pt-6 pb-8 sm:px-6">
         <div className="relative mb-6 h-48 overflow-hidden rounded-lg bg-surface sm:h-64">
           {backdrop && (
             <img
@@ -89,7 +98,7 @@ export default async function TvPage({ params }: { params: Promise<{ id: string 
 
           <div className="min-w-0">
             <p className="text-xs uppercase tracking-wide text-accent">Series</p>
-            <h1 className="mt-1 text-2xl font-semibold leading-tight sm:text-3xl">
+            <h1 className="font-display mt-1 text-2xl font-semibold leading-tight sm:text-3xl">
               {show.title}
               {show.year && <span className="ml-2 font-normal text-muted">{show.year}</span>}
             </h1>
@@ -147,7 +156,15 @@ export default async function TvPage({ params }: { params: Promise<{ id: string 
           createdBy={show.createdBy}
         />
 
-        <h2 className="mt-10 mb-4 text-lg font-semibold">Seasons</h2>
+        {/* No `states`/`ratings`: the page holds no card-state map, and
+            browse grids deliberately carry no OMDb scores. */}
+        {recommendations.length > 0 && (
+          <div className="mt-10">
+            <PosterGrid heading="More like this" items={recommendations} />
+          </div>
+        )}
+
+        <h2 className="mt-10 mb-4 text-xl font-semibold">Seasons</h2>
         <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {show.seasons.map((season) => (
             <li key={season.seasonNumber}>

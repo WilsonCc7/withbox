@@ -48,9 +48,8 @@ export function WatchlistToggle({
       <input name="tmdbId" type="hidden" value={tmdbId} />
       <button
         aria-busy={pending}
-        className={`inline-block rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-fg transition-colors hover:border-faint${
-          pending ? " opacity-60" : ""
-        }`}
+        className="inline-block cursor-pointer rounded-[var(--radius-control)] border border-border bg-surface px-3 py-1.5 text-sm text-fg transition-colors hover:border-faint active:bg-surface-hi disabled:cursor-not-allowed disabled:opacity-60"
+        disabled={pending}
         type="submit"
       >
         {optimistic ? "✓ In watchlist" : "Add to watchlist"}

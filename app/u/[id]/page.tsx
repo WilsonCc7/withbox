@@ -185,15 +185,25 @@ export default async function ProfilePage({
               </div>
             )}
             <div className="min-w-0">
-              <h1 className="text-xl font-semibold">{profile.name}</h1>
-              {profile.bio && <p className="mt-1 text-sm text-muted">{profile.bio}</p>}
+              <h1 className="font-display text-3xl tracking-tight text-fg">
+                {profile.name}
+              </h1>
+              {profile.bio && (
+                <p className="mt-1 max-w-[65ch] text-sm text-muted">{profile.bio}</p>
+              )}
               {isSelf && (
-                <a
-                  className="mt-1 inline-block text-sm text-accent hover:text-accent-hi"
-                  href="/settings"
-                >
-                  Edit profile
-                </a>
+                <div className="mt-1 flex gap-3 text-sm">
+                  <a
+                    className="text-accent hover:text-accent-hi"
+                    href="/settings"
+                  >
+                    Edit profile
+                  </a>
+                  {/* Owner-only: a year in review is nobody else's business. */}
+                  <a className="text-accent hover:text-accent-hi" href="/stats">
+                    Stats
+                  </a>
+                </div>
               )}
             </div>
           </div>
@@ -209,11 +219,11 @@ export default async function ProfilePage({
           )}
         </header>
 
-        <p className="pb-6 text-sm text-muted">
+        <p className="pb-6 text-sm tnum text-muted">
           {statsLine(stats, counts.followers, counts.following)}
         </p>
 
-        <section className="pb-8">
+        <section>
           <h2 className="mb-4 text-xl font-semibold text-fg">Favorites</h2>
           <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {favorites.map((ref, slot) => {
@@ -259,7 +269,7 @@ export default async function ProfilePage({
                       <input name="tmdbId" type="hidden" value={ref.tmdbId} />
                       <input name="slot" type="hidden" value={slot} />
                       <button
-                        className="mt-1 text-xs text-faint hover:text-danger"
+                        className="mt-1 flex min-h-11 w-full cursor-pointer items-center justify-center rounded-[var(--radius-control)] border border-border text-xs text-muted transition-colors hover:border-danger hover:text-danger active:bg-surface-hi"
                         type="submit"
                       >
                         Remove
@@ -273,9 +283,9 @@ export default async function ProfilePage({
         </section>
 
         {likedRefs.length > 0 && (
-          <section className="pb-8">
+          <section className="mt-10">
             {liked.length === 0 ? (
-              <p className="text-muted">These titles could not be loaded right now.</p>
+              <p className="max-w-[65ch] text-muted">These titles could not be loaded right now.</p>
             ) : (
               <PosterGrid heading="Liked" items={liked} />
             )}
@@ -283,7 +293,7 @@ export default async function ProfilePage({
         )}
 
         {diaryPage.items.length > 0 && (
-          <section className="pb-8">
+          <section className="mt-10">
             <div className="mb-1 flex items-baseline justify-between gap-4">
               <h2 className="text-xl font-semibold text-fg">Recent diary</h2>
               {isSelf && (
@@ -296,7 +306,7 @@ export default async function ProfilePage({
               )}
             </div>
             {diaryDetails.every((detail) => detail === null) && (
-              <p className="text-muted">These titles could not be loaded right now.</p>
+              <p className="max-w-[65ch] text-muted">These titles could not be loaded right now.</p>
             )}
             <div>
               {diaryPage.items.map((entry, i) => {
@@ -326,7 +336,7 @@ export default async function ProfilePage({
         )}
 
         {recentReviews.items.length > 0 && (
-          <section className="pb-8">
+          <section className="mt-10">
             <div className="mb-1 flex items-baseline justify-between gap-4">
               <h2 className="text-xl font-semibold text-fg">Reviews</h2>
               <a
@@ -337,7 +347,7 @@ export default async function ProfilePage({
               </a>
             </div>
             {reviewDetails.every((detail) => detail === null) && (
-              <p className="text-muted">These titles could not be loaded right now.</p>
+              <p className="max-w-[65ch] text-muted">These titles could not be loaded right now.</p>
             )}
             <div>
               {recentReviews.items.map((review, i) => {
@@ -388,12 +398,12 @@ export default async function ProfilePage({
                           <summary className="cursor-pointer text-xs text-muted">
                             Contains spoilers
                           </summary>
-                          <p className="mt-1 whitespace-pre-wrap text-sm text-fg">
+                          <p className="mt-1 max-w-[65ch] whitespace-pre-wrap text-sm text-fg">
                             {review.body}
                           </p>
                         </details>
                       ) : (
-                        <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-sm text-muted">
+                        <p className="mt-1 line-clamp-2 max-w-[65ch] whitespace-pre-wrap text-sm text-muted">
                           {review.body}
                         </p>
                       )}
@@ -405,7 +415,7 @@ export default async function ProfilePage({
           </section>
         )}
 
-        <section className="pb-8">
+        <section className="mt-10">
           {watchedPage.rows.length === 0 ? (
             page > 1 ? (
               <p className="text-muted">
@@ -421,7 +431,7 @@ export default async function ProfilePage({
               <p className="text-muted">Nothing watched yet.</p>
             )
           ) : watched.length === 0 ? (
-            <p className="text-muted">These titles could not be loaded right now.</p>
+            <p className="max-w-[65ch] text-muted">These titles could not be loaded right now.</p>
           ) : (
             <>
               {/* "Recently" is only accurate while the grid is the whole set;
@@ -463,7 +473,7 @@ export default async function ProfilePage({
           )}
         </section>
 
-        <section>
+        <section className="mt-10">
           <h2 className="mb-4 text-xl font-semibold text-fg">Lists</h2>
           {lists.length === 0 ? (
             <p className="text-muted">No lists yet.</p>

@@ -72,10 +72,9 @@ function StarHalf({
 /**
  * The ten half-star submit buttons plus a Clear button, with a hover preview.
  *
- * Deliberately form-less and free of hidden inputs: it drops into whatever form
- * encloses it (the title rating form, or the diary log form) and that form
- * supplies `kind`/`tmdbId`. Every button is a plain submit button, so a click
- * and a keyboard Enter take the same path through the enclosing form.
+ * Deliberately form-less and free of hidden inputs: it drops into the title
+ * rating form, which supplies `kind`/`tmdbId`. Every button is a plain submit
+ * button, so a click and a keyboard Enter take the same path through the form.
  */
 export function StarButtons({ value, name }: { value: number | null; name: string }) {
  // The previewed half-star while the pointer is over the row. Cleared on
@@ -162,6 +161,7 @@ export function StarRating({ kind, tmdbId, value, action }: StarRatingProps) {
 
  return (
   <div className="inline-flex flex-wrap items-center gap-2">
+   <span className="text-sm text-muted">Your rating</span>
    <form
     action={action}
     className="inline-flex"

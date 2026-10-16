@@ -61,7 +61,9 @@ export function FeedList({
             <p className="text-sm text-danger">
               Couldn&apos;t load more.{" "}
               <button
-                className="cursor-pointer text-accent hover:text-accent-hi"
+                aria-busy={pending}
+                className="touch-hit inline-block cursor-pointer rounded-[var(--radius-control)] px-1 text-accent transition-colors hover:text-accent-hi disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={pending}
                 onClick={loadMore}
                 type="button"
               >
@@ -70,17 +72,18 @@ export function FeedList({
             </p>
           ) : (
             <button
-              type="button"
-              onClick={loadMore}
+              aria-busy={pending}
+              className="cursor-pointer rounded-[var(--radius-control)] text-sm text-accent transition-colors hover:text-accent-hi active:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
               disabled={pending}
-              className={`cursor-pointer text-sm text-accent hover:text-accent-hi${pending ? " opacity-60" : ""}`}
+              onClick={loadMore}
+              type="button"
             >
               Load more
             </button>
           )}
           {/* No-JS path: the button needs JS, this link renders the next page server-side. */}
           <a
-            className="text-sm text-accent hover:text-accent-hi"
+            className="cursor-pointer rounded-[var(--radius-control)] text-sm text-accent transition-colors hover:text-accent-hi"
             href={`/feed?before=${encodeURIComponent(cursor)}`}
           >
             Older

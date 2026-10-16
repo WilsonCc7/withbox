@@ -2,16 +2,16 @@
 
 import { useEffect, useOptimistic, useRef, useTransition } from "react";
 import type { FormEvent } from "react";
-import { StarButtons } from "@/components/library/star-rating";
 import type { MediaKind } from "@/lib/media/types";
 
 /**
  * Log one viewing.
  *
- * This is the diary, not the title-level controls above it: it records an
- * entry with its own date and rewatch flag. The score and review it submits
- * are still the title's — the rating table has one row per title — so editing
- * the score here is the same write as the star row above.
+ * This is the diary entry only: a date and a rewatch flag. The title-level
+ * score and review live in the panel above it, so each of those is editable in
+ * exactly one place — the rating table has one row per title, and a second
+ * control here wrote the same row with no way to tell which one was being
+ * edited.
  *
  * The markup stays a real POST form, so the control works with JavaScript
  * disabled; with JavaScript the submit is intercepted and the label flips
@@ -48,9 +48,8 @@ export function LogForm({
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = event.currentTarget;
-    // `new FormData(form)` omits the clicked submit button, so a star tap
-    // would arrive with no `value` at all — carry it over by hand, same
-    // as the title-level StarRating.
+    // `new FormData(form)` omits the clicked submit button; carry it over so a
+    // named submitter (if one is ever added) still reaches the action.
     const submitter = (event.nativeEvent as SubmitEvent).submitter as
       | HTMLButtonElement
       | null;
@@ -66,9 +65,11 @@ export function LogForm({
   }
 
   return (
-    <details className="rounded-md border border-border bg-surface-hi">
+    // The panel section already draws the only border on this card, so the
+    // disclosure is a bare tinted surface — no second outline inside it.
+    <details className="rounded-[var(--radius-control)] bg-surface-hi">
       <summary className="cursor-pointer px-3 py-2 text-sm text-muted hover:text-fg">
-        Log a watch
+        Log a viewing
       </summary>
       <form
         action={log}
@@ -81,7 +82,7 @@ export function LogForm({
         <label className="flex flex-col gap-1 text-sm text-muted" htmlFor="log-watched-at">
           Watched on
           <input
-            className="w-40 rounded-md border border-border bg-surface-hi px-3 py-2 text-sm text-fg focus:border-accent"
+            className="w-40 rounded-[var(--radius-control)] border border-border bg-surface px-3 py-2 text-sm text-fg focus:border-accent"
             defaultValue={defaultDate}
             id="log-watched-at"
             name="watchedAt"
@@ -91,43 +92,25 @@ export function LogForm({
           />
         </label>
 
-        <span className="text-sm text-muted">Score</span>
-        <StarButtons name="value" value={null} />
-
-        <textarea
-          className="min-h-20 w-full rounded-md border border-border bg-surface-hi px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent"
-          name="body"
-          placeholder="What did you think?"
-        />
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted">
-          <label className="flex items-center gap-2">
-            <input
-              defaultChecked={alreadyWatched}
-              name="rewatch"
-              type="checkbox"
-              value="true"
-            />
-            Rewatch
-          </label>
-          <label className="flex items-center gap-2">
-            <input name="containsSpoilers" type="checkbox" value="true" />
-            Contains spoilers
-          </label>
-        </div>
+        <label className="flex items-center gap-2 text-sm text-muted">
+          <input
+            defaultChecked={alreadyWatched}
+            name="rewatch"
+            type="checkbox"
+            value="true"
+          />
+          Rewatch
+        </label>
 
         <button
           aria-busy={pending}
-          className={`self-start rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-fg transition-colors hover:border-faint${
+          className={`self-start rounded-[var(--radius-control)] border border-border bg-surface px-3 py-1.5 text-sm text-fg transition-colors hover:border-faint${
             pending ? " opacity-60" : ""
           }`}
           type="submit"
         >
           {optimistic ? "Logged ✓" : "Log watch"}
         </button>
-        <p className="text-xs text-faint">
-          The score and review belong to the title, not this entry — they are
-          stored once.
-        </p>
       </form>
     </details>
   );

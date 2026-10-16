@@ -41,7 +41,7 @@ export function FollowButton({
   if (!signedIn) {
     return (
       <a
-        className="text-accent hover:text-accent-hi"
+        className="cursor-pointer text-accent transition-colors hover:text-accent-hi"
         href={`/sign-in?next=/u/${targetId}`}
       >
         Sign in to follow
@@ -61,7 +61,7 @@ export function FollowButton({
         <button
           aria-busy={pending}
           aria-label={`Unfollow ${targetName}`}
-          className="inline-block rounded-md border border-border px-3 py-1.5 text-sm text-muted transition-colors hover:text-fg disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-block cursor-pointer rounded-[var(--radius-control)] border border-border px-3 py-1.5 text-sm text-muted transition-colors hover:text-fg active:bg-surface-hi disabled:cursor-not-allowed disabled:opacity-60"
           disabled={pending}
           type="submit"
         >
@@ -82,7 +82,7 @@ export function FollowButton({
       <button
         aria-busy={pending}
         aria-label={`Follow ${targetName}`}
-        className="inline-block rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-bg disabled:cursor-not-allowed disabled:opacity-60"
+        className="inline-block cursor-pointer rounded-[var(--radius-control)] bg-accent px-3 py-1.5 text-sm font-medium text-bg transition-colors hover:bg-accent-hi active:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
         disabled={pending}
         type="submit"
       >

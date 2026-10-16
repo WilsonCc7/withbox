@@ -62,9 +62,8 @@ export function EpisodeMarker({
       </span>
       <button
         aria-busy={pending}
-        className={`touch-hit rounded-md border border-border bg-surface px-2 py-1 text-xs text-fg transition-colors hover:border-faint${
-          pending ? " opacity-60" : ""
-        }`}
+        className="touch-hit cursor-pointer rounded-[var(--radius-control)] border border-border bg-surface px-2 py-1 text-xs text-fg transition-colors hover:border-faint active:bg-surface-hi disabled:cursor-not-allowed disabled:opacity-60"
+        disabled={pending}
         type="submit"
       >
         {optimistic ? "✓ Watched" : "Mark watched"}

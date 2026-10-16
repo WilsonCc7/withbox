@@ -44,7 +44,7 @@ export function DiaryRow({
 
   return (
     <div className="flex gap-3 border-b border-border py-3">
-      <a className="shrink-0" href={href}>
+      <a className="block shrink-0 cursor-pointer" href={href}>
         {poster ? (
           <img
             alt=""
@@ -62,7 +62,10 @@ export function DiaryRow({
           row past the viewport on a 375px phone. */}
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <a className="text-sm font-medium text-fg hover:text-accent" href={href}>
+          <a
+            className="cursor-pointer text-sm font-medium text-fg transition-colors hover:text-accent"
+            href={href}
+          >
             {title}
           </a>
           {season !== null && episode !== null && (
@@ -92,7 +95,7 @@ export function DiaryRow({
           <input name="entryId" type="hidden" value={entryId} />
           <button
             aria-label="Remove from diary"
-            className="rounded-md border border-border px-2 py-1 text-xs text-faint transition-colors hover:border-faint hover:text-fg"
+            className="touch-hit cursor-pointer rounded-[var(--radius-control)] border border-border px-2 py-1 text-xs text-muted transition-colors hover:border-danger hover:text-danger active:bg-surface-hi"
             type="submit"
           >
             Remove

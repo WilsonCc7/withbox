@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useOptimistic } from "react";
+import { startTransition, useState, useOptimistic } from "react";
 import { toggleWatched, toggleWatchlist } from "@/lib/library/actions";
 import type { MediaKind } from "@/lib/media/types";
 
@@ -35,8 +35,13 @@ export function CardQuickActions({
   { watched, inWatchlist },
   (prev: CardState, next: Partial<CardState>) => ({ ...prev, ...next }),
  );
+ // Disables the tapped control only: the pair shares one guard, but the
+ // other button must not flash its hover-only opacity while it is in flight.
+ const [pendingField, setPendingField] = useState<keyof CardState | null>(null);
 
  function submit(field: keyof CardState, action: (formData: FormData) => Promise<void>) {
+  if (pendingField) return;
+  setPendingField(field);
   const data = new FormData();
   data.set("kind", kind);
   data.set("tmdbId", String(tmdbId));
@@ -48,12 +53,16 @@ export function CardQuickActions({
      ? { watched: !state.watched }
      : { inWatchlist: !state.inWatchlist },
    );
-   await action(data);
+   try {
+    await action(data);
+   } finally {
+    setPendingField(null);
+   }
   });
  }
 
  const base =
-  "flex h-11 w-11 items-center justify-center rounded-full border border-border bg-bg/85 text-fg backdrop-blur transition-colors";
+  "touch-hit flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border border-border bg-bg/85 text-fg backdrop-blur transition hover:border-faint hover:bg-surface-hi active:scale-95 disabled:cursor-not-allowed disabled:opacity-60";
  const active = "border-accent text-accent";
  // Hover-only reveal would hide these entirely on touch: Tailwind gates
  // `hover:`/`group-hover:` behind `@media (hover: hover)`, which a coarse
@@ -62,12 +71,15 @@ export function CardQuickActions({
  const hidden =
   "opacity-0 pointer-coarse:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100";
 
+ // gap-3, not gap-1.5: `.touch-hit` expands each button by 12px, and at a 6px
+ // gap the first button's expansion covered the second's left edge.
  return (
-  <div className="absolute right-2 top-2 flex gap-1.5">
+  <div className="absolute right-2 top-2 flex gap-3">
    <button
     aria-label={state.watched ? "Watched" : "Mark watched"}
     aria-pressed={state.watched}
     className={`${base} ${state.watched ? active : hidden}`}
+    disabled={pendingField === "watched"}
     onClick={() => submit("watched", toggleWatched)}
     type="button"
    >
@@ -90,6 +102,7 @@ export function CardQuickActions({
     aria-label={state.inWatchlist ? "In watchlist" : "Add to watchlist"}
     aria-pressed={state.inWatchlist}
     className={`${base} ${state.inWatchlist ? active : hidden}`}
+    disabled={pendingField === "inWatchlist"}
     onClick={() => submit("inWatchlist", toggleWatchlist)}
     type="button"
    >

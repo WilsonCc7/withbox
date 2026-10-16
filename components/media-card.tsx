@@ -47,14 +47,10 @@ export function MediaCard({
               <span className="text-xs uppercase tracking-widest">No poster</span>
             </div>
           )}
-          {item.kind === "tv" && (
-            <span className="absolute left-2 top-2 rounded bg-bg/85 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">
-              Series
-            </span>
-          )}
           {/* Anchored to the poster, not the card: the title block
-              sits below it and must stay legible. */}
-          <span className="absolute bottom-2 left-2">
+              sits below it and must stay legible. The max width keeps a
+              long chip row from running off the poster. */}
+          <span className="absolute bottom-2 left-2 max-w-[calc(100%-1rem)] whitespace-nowrap">
             <RatingBadges
               imdb={ratings?.imdb ?? null}
               rt={ratings?.rt ?? null}
@@ -66,10 +62,11 @@ export function MediaCard({
         </div>
         <div className="flex flex-1 flex-col gap-1 p-3">
           <h3 className="text-sm font-semibold leading-snug text-fg">{item.title}</h3>
+          {/* The year alone: `RatingBadges` already shows the labelled score
+              chip above, so a bare number here read as a second, unlabelled
+              score. The `Series` marker moved off the poster into this line. */}
           <p className="text-xs text-muted">
-            {[item.year, item.voteAverage != null ? item.voteAverage.toFixed(1) : null]
-              .filter(Boolean)
-              .join(" · ") || "\u00A0"}
+            {[item.kind === "tv" ? "Series" : null, item.year].filter(Boolean).join(" · ") || "\u00A0"}
           </p>
         </div>
       </a>

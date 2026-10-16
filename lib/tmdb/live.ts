@@ -24,10 +24,17 @@ import type {
   TvDetail,
 } from "@/lib/media/types";
 import { acquire } from "@/lib/rate-limit";
+import type { MediaRef } from "@/lib/library/types";
 import { cacheKey, cachedJson } from "./cache";
 import * as map from "./map";
 
 const API_BASE = "https://api.themoviedb.org/3";
+
+/** `find/{external_id}` — the two result buckets this call reads. */
+interface WireFindResponse {
+  movie_results?: map.WireMediaSummary[];
+  tv_results?: map.WireMediaSummary[];
+}
 
 /** Any non-2xx response other than 404. */
 export class TmdbHttpError extends Error {
@@ -45,6 +52,8 @@ function ttlFor(path: string): number {
   if (path.startsWith("trending/")) return 3600;
   if (path.startsWith("search/")) return 600;
   if (path.endsWith("/external_ids")) return 604800;
+  // `find/{imdb_id}` is an id lookup: the answer never changes.
+  if (path.startsWith("find/")) return 604800;
   return 86400;
 }
 
@@ -153,6 +162,35 @@ export function createLiveSource(
     async credits(kind: MediaKind, tmdbId: number): Promise<Credits> {
       const wire = await get<map.WireCredits>(`${kind}/${tmdbId}/credits`);
       return map.mapCredits(kind, wire);
+    },
+
+    async recommendations(
+      kind: MediaKind,
+      tmdbId: number,
+    ): Promise<MediaSummary[]> {
+      try {
+        const wire = await get<map.WireListResponse<map.WireMediaSummary>>(
+          `${kind}/${tmdbId}/recommendations`,
+        );
+        return (wire?.results ?? [])
+          .slice(0, 12)
+          .map((result) => map.mapSummary(kind, result));
+      } catch {
+        // The row is decorative: an upstream failure empties it rather
+        // than taking the whole detail page down.
+        return [];
+      }
+    },
+
+    async findByImdbId(imdbId: string): Promise<MediaRef | null> {
+      const wire = await get<WireFindResponse>(
+        `find/${imdbId}`,
+        new URLSearchParams({ external_source: "imdb_id" }),
+      );
+      const movie = wire?.movie_results?.[0];
+      if (movie) return { kind: "movie", tmdbId: movie.id };
+      const show = wire?.tv_results?.[0];
+      return show ? { kind: "tv", tmdbId: show.id } : null;
     },
   };
 }

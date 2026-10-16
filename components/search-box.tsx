@@ -107,8 +107,11 @@ export function SearchBox({ defaultQuery = "" }: { defaultQuery?: string }) {
   }
  }
 
+ // Collapsed on mobile because a static 160px box overflows a 320px header;
+ // it expands on focus with no transition, since animating `width` is layout
+ // thrash. Only the input's colours ease (see `transition-colors` below).
  return (
-  <div className="relative w-10 transition-[width] focus-within:w-40 sm:w-64" ref={wrapperRef}>
+  <div className="relative w-10 focus-within:w-40 sm:w-64" ref={wrapperRef}>
    {/* Collapsed to 40px the input shows no text, so without this the box
           reads as an empty rectangle on mobile. */}
    <svg
@@ -132,7 +135,7 @@ export function SearchBox({ defaultQuery = "" }: { defaultQuery?: string }) {
      aria-controls="search-listbox"
      aria-expanded={open}
      autoComplete="off"
-     className="w-full rounded-md border border-border bg-surface py-1.5 pl-8 pr-3 text-sm text-fg placeholder:text-faint focus:border-accent"
+     className="w-full rounded-md border border-border bg-surface py-1.5 pl-8 pr-3 text-sm text-fg transition-colors placeholder:text-faint focus:border-accent"
      id="site-search"
      name="q"
      onBlur={(event) => {
@@ -181,7 +184,7 @@ export function SearchBox({ defaultQuery = "" }: { defaultQuery?: string }) {
           <span className="block truncate text-sm text-fg">{item.title}</span>
           <span className="mt-0.5 flex items-center gap-2 text-xs text-muted">
            <span>{item.year ?? "—"}</span>
-           <span className="rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
+           <span className="whitespace-nowrap rounded border border-border px-1.5 py-0.5 text-xs uppercase tracking-wide">
             {item.kind === "movie" ? "Film" : "Series"}
            </span>
           </span>

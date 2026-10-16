@@ -207,7 +207,8 @@ export function mapExternalIds(
 const MOVIE_CREW_JOBS = ["Director"];
 const TV_CREW_JOBS = ["Writer", "Screenplay", "Creator"];
 
-/** Cast by billing order (max 20); crew reduced to the roles worth showing. */
+/** Cast by billing order (max 8 — one full row of the 8-column grid); crew
+ * reduced to the roles worth showing. */
 export function mapCredits(
   kind: MediaKind,
   wire: WireCredits | null | undefined,
@@ -215,7 +216,7 @@ export function mapCredits(
   const cast: CastMember[] = (wire?.cast ?? [])
     .slice()
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-    .slice(0, 20)
+    .slice(0, 8)
     .map((person) => ({
       tmdbId: person.id,
       name: person.name,

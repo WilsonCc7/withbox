@@ -47,7 +47,7 @@ export function MediaLibraryPanel({
   const currentSlot = slotIndex === -1 ? null : slotIndex;
 
   return (
-    <section className="mt-8 flex flex-col gap-5 rounded-lg border border-border bg-surface p-4">
+    <section className="mt-8 flex flex-col gap-5 rounded-[var(--radius-card)] border border-border bg-surface p-4">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
         <WatchToggle
           action={toggleWatched}
@@ -64,14 +64,7 @@ export function MediaLibraryPanel({
         {liked !== undefined && (
           <LikeToggle action={toggleLiked} kind={kind} liked={liked} tmdbId={tmdbId} />
         )}
-        {favorites !== undefined && (
-          <FavoriteToggle
-            currentSlot={currentSlot}
-            kind={kind}
-            occupied={favorites.map((favorite) => favorite !== null)}
-            tmdbId={tmdbId}
-          />
-        )}
+        <StarRating action={setRating} kind={kind} tmdbId={tmdbId} value={state.rating} />
         {state.watchedAt && (
           <span className="text-xs text-faint">
             Last watched {state.watchedAt.toISOString().slice(0, 10)}
@@ -79,7 +72,14 @@ export function MediaLibraryPanel({
         )}
       </div>
 
-      <StarRating action={setRating} kind={kind} tmdbId={tmdbId} value={state.rating} />
+      {favorites !== undefined && (
+        <FavoriteToggle
+          currentSlot={currentSlot}
+          kind={kind}
+          occupied={favorites.map((favorite) => favorite !== null)}
+          tmdbId={tmdbId}
+        />
+      )}
 
       <ReviewForm
         action={setReview}

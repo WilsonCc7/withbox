@@ -6,6 +6,7 @@
  * TMDB's wire format — TMDB field names (which are inconsistent between the
  * movie and TV endpoints) stop at the transport boundary.
  */
+import type { MediaRef } from "@/lib/library/types";
 
 export type MediaKind = "movie" | "tv";
 
@@ -133,4 +134,10 @@ export interface MediaSource {
 
   /** Cast and crew. A missing title yields empty lists. */
   credits(kind: MediaKind, tmdbId: number): Promise<Credits>;
+
+  /** Up to 12 similar titles. A missing title or failed lookup yields `[]`. */
+  recommendations(kind: MediaKind, tmdbId: number): Promise<MediaSummary[]>;
+
+  /** Reverse lookup for imports. An unknown id yields `null`. */
+  findByImdbId(imdbId: string): Promise<MediaRef | null>;
 }

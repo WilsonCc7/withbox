@@ -1,6 +1,7 @@
 import { AccountMenu } from "@/components/account-menu";
 import { BottomTabBar } from "@/components/bottom-tab-bar";
 import { SearchBox } from "@/components/search-box";
+import { NavLink } from "@/components/tab-link";
 import { currentUser } from "@/lib/session";
 
 export async function SiteHeader({ defaultQuery = "" }: { defaultQuery?: string }) {
@@ -10,29 +11,21 @@ export async function SiteHeader({ defaultQuery = "" }: { defaultQuery?: string 
     <>
       <header className="sticky top-0 z-10 border-b border-border bg-bg/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3 sm:px-6">
-          <a className="text-lg font-bold text-fg" href="/">
+          <a className="shrink-0 font-display text-lg font-bold text-fg" href="/">
             Withbox
           </a>
 
-          <nav className="flex items-center gap-4 overflow-x-auto text-sm scrollbar-none sm:overflow-visible">
-            <a className="shrink-0 text-muted hover:text-fg" href="/feed">
-              Feed
-            </a>
-            <a className="shrink-0 text-muted hover:text-fg" href="/watched">
-              Watched
-            </a>
-            <a className="shrink-0 text-muted hover:text-fg" href="/watchlist">
-              Watchlist
-            </a>
-            <a className="shrink-0 text-muted hover:text-fg" href="/diary">
-              Diary
-            </a>
-            <a className="shrink-0 text-muted hover:text-fg" href="/lists">
-              Lists
-            </a>
-            <a className="shrink-0 text-muted hover:text-fg" href="/people">
-              People
-            </a>
+          {/* Hidden below `sm`: at 390px this row was squeezed to 154px and
+              clipped its own labels mid-word ("Wat"). The tab bar owns
+              navigation at that width. `overflow-x-auto` stays so a narrow
+              `sm` viewport scrolls the row instead of widening the page. */}
+          <nav className="hidden items-center gap-4 overflow-x-auto text-sm scrollbar-none sm:flex">
+            <NavLink href="/feed" label="Feed" />
+            <NavLink href="/watched" label="Watched" />
+            <NavLink href="/watchlist" label="Watchlist" />
+            <NavLink href="/diary" label="Diary" />
+            <NavLink href="/lists" label="Lists" />
+            <NavLink href="/people" label="People" />
           </nav>
 
           {/* On mobile the collapsed box is a 40px icon-sized target that
@@ -44,7 +37,10 @@ export async function SiteHeader({ defaultQuery = "" }: { defaultQuery?: string 
           {user ? (
             <AccountMenu user={{ id: user.id, name: user.name, image: user.image }} />
           ) : (
-            <a className="text-sm text-accent hover:text-accent-hi" href="/sign-in">
+            <a
+              className="shrink-0 whitespace-nowrap text-sm text-accent hover:text-accent-hi"
+              href="/sign-in"
+            >
               Sign in
             </a>
           )}
