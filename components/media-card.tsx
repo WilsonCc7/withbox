@@ -19,12 +19,18 @@ export function MediaCard({
   item,
   ratings,
   state,
+  progress,
+  caption,
 }: {
   item: MediaSummary;
   /** OMDb scores when the key is configured; absent renders the TMDB chip. */
   ratings?: MediaRatings;
   /** Per-user overlay state, signed in only. */
   state?: { watched: boolean; inWatchlist: boolean };
+  /** 0–1 watched fraction; the poster foot bar is omitted when absent. */
+  progress?: number;
+  /** One short line under the title block (e.g. the resume point). */
+  caption?: string;
 }) {
   const href = item.kind === "movie" ? `/movie/${item.tmdbId}` : `/tv/${item.tmdbId}`;
   const poster = imageUrl(item.posterPath, "w342");
@@ -59,6 +65,17 @@ export function MediaCard({
               voteCount={item.voteCount}
             />
           </span>
+          {progress !== undefined && (
+            /* Sits on the poster, not the card: the title block below must
+               stay readable. The wrapper is already `overflow-hidden`, so
+               the 0% case is a zero-width sliver with no clipping artifact. */
+            <div className="absolute inset-x-0 bottom-0 h-[3px] bg-bg/70">
+              <div
+                className="h-full bg-accent"
+                style={{ width: `${Math.round(progress * 100)}%` }}
+              />
+            </div>
+          )}
         </div>
         <div className="flex flex-1 flex-col gap-1 p-3">
           <h3 className="text-sm font-semibold leading-snug text-fg">{item.title}</h3>
@@ -68,6 +85,7 @@ export function MediaCard({
           <p className="text-xs text-muted">
             {[item.kind === "tv" ? "Series" : null, item.year].filter(Boolean).join(" · ") || "\u00A0"}
           </p>
+          {caption && <p className="text-xs text-muted">{caption}</p>}
         </div>
       </a>
       {state && (

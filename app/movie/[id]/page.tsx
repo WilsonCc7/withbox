@@ -33,7 +33,30 @@ export default async function MoviePage({ params }: { params: Promise<{ id: stri
   if (!Number.isInteger(tmdbId) || tmdbId <= 0) notFound();
 
   const source = mediaSource();
-  const movie = await source.movie(tmdbId);
+  const user = await currentUser();
+  const ref = { kind: "movie" as const, tmdbId };
+
+  // One round trip for every independent read; the title lookup is in here
+  // too, so nothing waits on it. Per-user queries are skipped when signed out.
+  const [
+    movie,
+    ratings,
+    credits,
+    recommendations,
+    watchState,
+    inWatchlist,
+    liked,
+    favorites,
+  ] = await Promise.all([
+    source.movie(tmdbId),
+    getRatings(source, ref),
+    source.credits("movie", tmdbId),
+    source.recommendations("movie", tmdbId),
+    user ? getWatchState(user.id, ref) : null,
+    user ? isInWatchlist(user.id, ref) : false,
+    user ? isLiked(user.id, "movie", tmdbId) : false,
+    user ? getFavorites(user.id) : [],
+  ]);
 
   if (!movie) notFound();
 
@@ -44,27 +67,6 @@ export default async function MoviePage({ params }: { params: Promise<{ id: stri
     .filter(Boolean)
     .join(" · ");
 
-  const user = await currentUser();
-  const ref = { kind: "movie" as const, tmdbId };
-  // One round trip for all post-detail work; per-user queries are
-  // skipped entirely when signed out.
-  const [
-    ratings,
-    credits,
-    recommendations,
-    watchState,
-    inWatchlist,
-    liked,
-    favorites,
-  ] = await Promise.all([
-    getRatings(source, ref),
-    source.credits("movie", tmdbId),
-    source.recommendations("movie", tmdbId),
-    user ? getWatchState(user.id, ref) : null,
-    user ? isInWatchlist(user.id, ref) : false,
-    user ? isLiked(user.id, "movie", tmdbId) : false,
-    user ? getFavorites(user.id) : [],
-  ]);
   const lists = user ? await getListsByUser(user.id) : [];
 
   return (

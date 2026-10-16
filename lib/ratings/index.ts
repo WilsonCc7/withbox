@@ -1,7 +1,14 @@
 /**
  * IMDb / Rotten Tomatoes scores via OMDb.
  *
- * A TMDB id resolves to an IMDb id (cached 30d), then to scores (cached 7d).
+ * Two cache levels, checked outermost first:
+ *  - `omdb:scores:{kind}:{tmdbId}` — the title-keyed scores. This is the entry
+ *    a grid hits: one KV read and no TMDB round trip. Written whenever a
+ *    title's scores are resolved (including an OMDb `Response: False` miss).
+ *  - `omdb:ids:{kind}:{tmdbId}` (30d) then `omdb:scores:{imdbId}` (7d) — the
+ *    original two-hop path, which serves the fast path's miss and keeps the
+ *    entries written before the fast path existed working.
+ *
  * Every failure — missing key, no IMDb id, network error, timeout — degrades
  * to `{ imdb: null, rt: null }` so callers fall back to the TMDB score.
  * Nothing from this module throws.
@@ -43,6 +50,14 @@ export async function getRatings(
  if (!apiKey || !kv) return NONE;
 
  try {
+  // Fast path: one read, no TMDB `external_ids` call. This is the entry a
+  // grid hits once any page has resolved the title's scores.
+  const titleKey = `omdb:scores:${ref.kind}:${ref.tmdbId}`;
+  const titleCached = await kv.get(titleKey, "json");
+  if (titleCached !== null && titleCached !== undefined) {
+   return titleCached as MediaRatings;
+  }
+
   const imdbId = await cachedJson<string | null>(
    kv,
    `omdb:ids:${ref.kind}:${ref.tmdbId}`,
@@ -78,9 +93,13 @@ export async function getRatings(
    };
 
   try {
-   await kv.put(scoreKey, JSON.stringify(scores), {
-    expirationTtl: miss ? MISS_TTL : SCORE_TTL,
-   });
+   // Both keys, same payload: the imdb-keyed entry is shared by titles that
+   // point at the same IMDb id, the title-keyed one is what a grid hits.
+   const expirationTtl = miss ? MISS_TTL : SCORE_TTL;
+   await Promise.all([
+    kv.put(scoreKey, JSON.stringify(scores), { expirationTtl }),
+    kv.put(titleKey, JSON.stringify(scores), { expirationTtl }),
+   ]);
   } catch {
    // A cache write failing must not fail the request.
   }

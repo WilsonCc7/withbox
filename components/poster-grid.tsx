@@ -8,6 +8,8 @@ export function PosterGrid({
   heading,
   ratings,
   states,
+  progress,
+  captions,
   emptyHint,
 }: {
   items: MediaSummary[];
@@ -16,6 +18,10 @@ export function PosterGrid({
   ratings?: Map<string, MediaRatings>;
   /** Keyed by `mediaKey`; absent when signed out. */
   states?: Map<string, { watched: boolean; inWatchlist: boolean }>;
+  /** Keyed by `mediaKey`; 0–1 watched fraction for the poster foot bar. */
+  progress?: Map<string, number>;
+  /** Keyed by `mediaKey`; one short line under the card's title block. */
+  captions?: Map<string, string>;
   /** One line telling the user what to do next; shown under the empty copy. */
   emptyHint?: string;
 }) {
@@ -37,6 +43,8 @@ export function PosterGrid({
                 item={item}
                 ratings={ratings?.get(mediaKey(item))}
                 state={states?.get(mediaKey(item))}
+                progress={progress?.get(mediaKey(item))}
+                caption={captions?.get(mediaKey(item))}
               />
             </li>
           ))}

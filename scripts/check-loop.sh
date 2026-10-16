@@ -935,9 +935,36 @@ FF=$(iframe_src /tmp/fresh-film.html)
 [[ "$FF" == *framextv* ]] || fail "a fresh film did not default to framextv (got $FF)"
 echo "ok  a saved position prefers a resumable source, a fresh film keeps the default"
 
-# Leave the film mid-watch for the continue-watching check at the end.
+# Leave the film mid-watch for the continue-watching check below.
 ACTJAR="$JAR" post_action "$BASE/watch/movie/550" "\$ACTION_ID_$SAVE" \
   kind=movie tmdbId=550 position=600 duration=5000 >/dev/null
+
+# --- continue watching ---------------------------------------------------
+# A part-watched title must reach the home page, with the percentage that
+# makes the rail worth having.
+curl -s -m 30 "$BASE/" -b "$JAR" -o /tmp/home-continue.html
+body /tmp/home-continue.html | grep -q "Continue watching" \
+  || fail "home offers no continue-watching rail after a partial watch"
+body /tmp/home-continue.html | grep -q "Resume" \
+  || fail "the continue-watching rail shows no resume caption"
+
+# A title 96% of the way through is finished, not unfinished: the same rule
+# that stops the watch page resuming three seconds in. Counting the captions
+# before and after is what proves the row was excluded rather than merely
+# unrendered.
+CBEFORE=$(body /tmp/home-continue.html | grep -o "Resume" | wc -l || true)
+ACTJAR="$JAR" post_action "$BASE/watch/movie/27205" "\$ACTION_ID_$SAVE" \
+  kind=movie tmdbId=27205 position=4800 duration=5000 >/dev/null
+curl -s -m 30 "$BASE/" -b "$JAR" -o /tmp/home-continue2.html
+CAFTER=$(body /tmp/home-continue2.html | grep -o "Resume" | wc -l || true)
+[[ "$CAFTER" == "$CBEFORE" ]] \
+  || fail "a 96%-complete title appeared in continue watching ($CBEFORE -> $CAFTER)"
+
+# Signed out there is no rail at all.
+curl -s -m 15 "$BASE/" -o /tmp/home-continue-out.html
+body /tmp/home-continue-out.html | grep -q "Continue watching" \
+  && fail "signed-out home offers a continue-watching rail"
+echo "ok  continue watching lists a part-watched title, excludes a finished one, and needs a session"
 
 # --- a different favourite slot moves the title --------------------------
 # Same slot toggles off; a DIFFERENT slot used to delete the row instead of

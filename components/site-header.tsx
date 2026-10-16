@@ -30,8 +30,17 @@ export async function SiteHeader({ defaultQuery = "" }: { defaultQuery?: string 
 
           {/* On mobile the collapsed box is a 40px icon-sized target that
               expands while focused; the tab bar also links to /search. */}
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
             <SearchBox defaultQuery={defaultQuery} />
+            {/* Purely informational: the palette owns the binding, so this is
+                a <kbd>, never a focusable control. Hidden below `sm`, where
+                the header has no room for it. */}
+            <kbd
+              aria-label="Command K opens the command palette"
+              className="hidden rounded-[var(--radius-control)] border border-border px-1.5 py-0.5 text-xs text-faint sm:inline-block"
+            >
+              ⌘K
+            </kbd>
           </div>
 
           {user ? (

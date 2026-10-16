@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { CommandPalette } from "@/components/command-palette";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -19,6 +20,8 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <footer className="mx-auto mt-16 max-w-6xl px-4 pb-10 text-xs text-faint sm:px-6">
           This product uses the TMDB API but is not endorsed or certified by TMDB.
         </footer>
+        {/* Renders nothing while closed, so every page keeps its own tab order. */}
+        <CommandPalette />
       </body>
     </html>
   );

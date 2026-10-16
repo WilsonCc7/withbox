@@ -74,9 +74,11 @@ export default async function WatchedPage({
   });
   const source = mediaSource();
 
-  // The refs this grid shows. getCardStates is two indexed D1 reads;
-  // getRatingsBatch is KV-cached and rate-limited — a cold cache
-  // costs one OMDb call per title (up to 60 on a first, empty view).
+  // The refs this grid shows. getCardStates is three watch-state statements
+  // plus one watchlist statement per 60-ref chunk; getRatingsBatch is
+  // KV-cached and rate-limited — a cold cache costs one OMDb call per title.
+  // Only the first 24 refs get real IMDb/RT chips so a large library cannot
+  // fan out unbounded; cards beyond that show the TMDB chip.
   const refs = rows.map(({ ref }) => ref);
   const [items, cardStates, ratings] = await Promise.all([
     Promise.all(
@@ -87,7 +89,7 @@ export default async function WatchedPage({
       resolved.filter((item): item is MediaDetail => item !== null),
     ),
     getCardStates(user.id, refs),
-    getRatingsBatch(source, refs),
+    getRatingsBatch(source, refs.slice(0, 24)),
   ]);
 
   const singlePage = page === 1 && !hasMore;

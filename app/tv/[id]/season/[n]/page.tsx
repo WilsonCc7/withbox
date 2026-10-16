@@ -5,6 +5,7 @@ import { SiteHeader } from "@/components/site-header";
 import { markSeason, toggleWatched } from "@/lib/library/actions";
 import { getEpisodeMarks } from "@/lib/library/queries";
 import { imageUrl } from "@/lib/media/images";
+import type { Episode } from "@/lib/media/types";
 import { mediaSource } from "@/lib/media/runtime";
 import { currentUser } from "@/lib/session";
 
@@ -20,8 +21,11 @@ export default async function SeasonPage({
   const invalid =
     !Number.isInteger(tmdbId) || tmdbId <= 0 || !Number.isInteger(seasonNumber) || seasonNumber < 0;
 
-  const show = invalid ? null : await mediaSource().tv(tmdbId);
-  const episodes = show ? await mediaSource().episodes(tmdbId, seasonNumber) : [];
+  // Two independent TMDB calls; neither reads the other's result.
+  const [show, episodes] = await Promise.all([
+    invalid ? Promise.resolve(null) : mediaSource().tv(tmdbId),
+    invalid ? Promise.resolve<Episode[]>([]) : mediaSource().episodes(tmdbId, seasonNumber),
+  ]);
 
   if (!show) notFound();
 

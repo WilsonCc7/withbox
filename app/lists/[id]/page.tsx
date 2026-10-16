@@ -10,7 +10,6 @@ import { mediaSource } from "@/lib/media/runtime";
 import { deleteList } from "@/lib/social/actions";
 import { getCardStates } from "@/lib/library/queries";
 import { getListById, isListOwner } from "@/lib/social/queries";
-import { getRatingsBatch } from "@/lib/ratings";
 import { currentUser } from "@/lib/session";
 
 export default async function ListDetailPage({
@@ -43,25 +42,19 @@ export default async function ListDetailPage({
 
   // Raw resolutions keep their index alignment with `list.items`,
   // so the owner controls can show a title even when a detail
-  // is null. getCardStates is two indexed D1 reads;
-  // getRatingsBatch is KV-cached and rate-limited — a cold
-  // cache costs one OMDb call per title. Owner only; visitors
-  // render plain cards.
+  // is null. getCardStates is three watch-state statements plus one
+  // watchlist statement per 60-ref chunk. No OMDb call: a cold browse
+  // grid must not fan out — cards show the TMDB chip. Owner only;
+  // visitors render plain cards.
   const details = await Promise.all(
     list.items.map(async (ref) =>
       ref.kind === "movie" ? await source.movie(ref.tmdbId) : await source.tv(ref.tmdbId),
     ),
   );
-  const [cardStates, ratings] = await Promise.all([
-    owner && user
-      ? getCardStates(user.id, list.items)
-      : Promise.resolve(new Map()),
-    owner && user
-      ? getRatingsBatch(source, list.items)
-      : Promise.resolve(new Map<string, never>()),
-  ]);
+  const cardStates =
+    owner && user ? await getCardStates(user.id, list.items) : new Map();
 
-  const overlays = owner && user ? { ratings, states: cardStates } : undefined;
+  const overlays = owner && user ? { states: cardStates } : undefined;
   const items = details.filter(
     (item): item is MediaDetail => item !== null,
   );
@@ -107,7 +100,6 @@ export default async function ListDetailPage({
           <div className="mt-6">
             <PosterGrid
               items={items}
-              ratings={overlays?.ratings}
               states={overlays?.states}
             />
             {owner && (

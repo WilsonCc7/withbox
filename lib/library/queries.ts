@@ -1,6 +1,7 @@
 import type { MediaKind } from "@/lib/media/types";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
 import { getDb } from "@/lib/db";
+import { RESUME_MIN_SECONDS } from "@/lib/player/progress";
 import {
  favorite,
  mediaLike,
@@ -315,6 +316,64 @@ export async function getWatched(
  };
 }
 
+export interface ContinueRow {
+ ref: MediaRef;
+ season: number | null;
+ episode: number | null;
+ positionSeconds: number;
+ durationSeconds: number | null;
+ updatedAt: Date;
+}
+
+/**
+ * Part-watched titles for the home rail: one statement, newest activity
+ * first. `playback_progress_user_index` covers the `userId` predicate.
+ *
+ * Two predicates earn their place. The floor (`positionSeconds >
+ * RESUME_MIN_SECONDS`) drops positions too short to be worth resuming — the
+ * same rule the watch page applies, imported rather than re-stated. The
+ * near-end exclusion keeps a finished title off the rail: a `null` duration
+ * (vidsrc reports no duration) is kept because "unknown" is not "finished",
+ * but a known duration under 95% played is required.
+ */
+export async function getContinueWatching(
+ userId: string,
+ limit = 12,
+): Promise<ContinueRow[]> {
+ const rows = await getDb()
+  .select({
+   kind: playbackProgress.kind,
+   tmdbId: playbackProgress.tmdbId,
+   season: playbackProgress.season,
+   episode: playbackProgress.episode,
+   positionSeconds: playbackProgress.positionSeconds,
+   durationSeconds: playbackProgress.durationSeconds,
+   updatedAt: playbackProgress.updatedAt,
+  })
+  .from(playbackProgress)
+  .where(
+   and(
+    eq(playbackProgress.userId, userId),
+    gt(playbackProgress.positionSeconds, RESUME_MIN_SECONDS),
+    or(
+     isNull(playbackProgress.durationSeconds),
+     sql`${playbackProgress.positionSeconds} < ${playbackProgress.durationSeconds} * 0.95`,
+    ),
+   ),
+  )
+  .orderBy(desc(playbackProgress.updatedAt))
+  .limit(limit);
+
+ return rows.map((row) => ({
+  ref: { kind: row.kind, tmdbId: row.tmdbId },
+  season: row.season,
+  episode: row.episode,
+  positionSeconds: row.positionSeconds,
+  durationSeconds: row.durationSeconds,
+  updatedAt: row.updatedAt,
+ }));
+}
+
 export async function isInWatchlist(
  userId: string,
  ref: MediaRef,
@@ -587,8 +646,10 @@ export interface ProfileStats {
 /**
  * Profile counts. Title counts use `COUNT(DISTINCT)` — a
  * rewatch is one watched title — and the rest are plain
- * `COUNT(*)`. One statement; follower counts are deliberately
- * absent (they come from `lib/social/queries.ts`).
+ * `COUNT(*)`. Five statements issued in parallel, and the
+ * block's latency is the slowest one, not their sum; follower
+ * counts are deliberately absent (they come from
+ * `lib/social/queries.ts`).
  */
 export async function getProfileStats(
  userId: string,
