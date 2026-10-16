@@ -5,22 +5,42 @@ review it, keep a watchlist, follow other users, and play titles in-app.
 
 Deployed to Cloudflare Workers on your own domain.
 
+- **Library tracking** — watched / watchlist / liked toggles that update optimistically and
+  still work with JavaScript disabled; four favourites per profile.
+- **Diary** — every watch is its own row: date, rewatch flag, episode, review excerpt, and
+  a delete that un-watches one watch without forgetting the title. Filter by year or month.
+- **Profiles** — avatar (R2), bio, stats, favourites, liked titles, recent diary, reviews.
+- **Rating badges** — IMDb and Rotten Tomatoes chips on posters and detail pages, plus a
+  TMDB fallback; real scores come from OMDb, cached so steady-state traffic is near zero.
+- **Discovery** — trending films and series, debounced instant search, cast and crew rows,
+  kind filters and a rating sort, list rename/reordering, and a paginated activity feed.
+- **Player** — pluggable stream-source adapters, resume positions, auto-advance, and a
+  remembered source across visits.
+- **Mobile** — bottom tab bar, 2-up poster grids, touch-visible quick actions.
+
 | Layer | Choice |
 |---|---|
 | Build | **vinext** (Next.js App Router on Vite), TypeScript |
 | Runtime | Cloudflare Workers |
 | UI | Tailwind CSS v4 |
 | Database | D1 (SQLite) via Drizzle ORM |
+| Cache | Workers KV — TMDB responses, IMDb id / OMDb score maps |
 | Auth | Better Auth — email + password, multi-user |
 | Metadata | TMDB (movies + TV, per-episode data) — server-side only |
+| Ratings | OMDb → IMDb / Rotten Tomatoes chips (optional key) |
+| Storage | R2 — avatars, served from `/api/avatar/{userId}` |
 | Player | Pluggable stream-source adapters, iframe embeds |
 
 ```
 app/ (routes, RSC)   pages; never call TMDB directly
-  lib/tmdb/          TMDB client: caching, rate limiting, ID mapping
+  lib/tmdb/          TMDB client: KV cache, rate limiting, ID mapping
+  lib/ratings/       OMDb → IMDb / RT, cached in two layers
+  lib/library/       user library: server actions + reads
+  lib/social/        follow, feed, lists, activity
+  lib/profile/       profile, bio, avatar actions
   lib/sources/       stream source adapters (the seam)
-  db/                Drizzle schema + migrations (D1)
-  components/        UI: player shell, poster grids
+  db/                Drizzle schema; migrations in drizzle/
+  components/        UI: shell + tab bar, poster grids, player shell
 ```
 
 ## Requirements
@@ -28,6 +48,8 @@ app/ (routes, RSC)   pages; never call TMDB directly
 - Node 20+ and `pnpm` (`packageManager` pins `pnpm@12.8.1`)
 - A Cloudflare account (only for deployment)
 - A TMDB API read token (only for live metadata; see *Fixture mode*)
+- Optional: an OMDb key for real IMDb / Rotten Tomatoes chips. Without it the badges show
+  the TMDB score, and nothing else changes.
 
 ## Getting started
 
@@ -41,10 +63,13 @@ Create `.dev.vars` in the repository root:
 TMDB_API_KEY=your-tmdb-read-token
 TMDB_MODE=auto
 BETTER_AUTH_SECRET=any-long-random-string
+OMDB_API_KEY=your-omdb-key          # optional: real IMDb / RT chips
 ```
 
-> `.dev.vars` is git-ignored. Keep permissions tight (`chmod 600 .dev.vars`). The TMDB
-> token is a server-side secret and must never reach client code or the repository.
+> `.dev.vars` is git-ignored. Keep permissions tight (`chmod 600 .dev.vars`). Both tokens
+> are server-side secrets and must never reach client code or the repository. Without
+> `OMDB_API_KEY` the app runs exactly the same, only the badges fall back to the TMDB
+> score instead of IMDb / Rotten Tomatoes — which is what fixture mode renders anyway.
 
 Build and start the app:
 
@@ -104,17 +129,35 @@ type-checks do not regenerate binding types on their own.
 ### Testing
 
 ```sh
-pnpm run build
-pnpm exec vite preview --port 8787 &
-bash scripts/reset-local-db.sh    # drop + re-migrate local D1
-bash scripts/check-loop.sh        # resets local D1, then drives the whole app
+bash scripts/check-loop.sh   # builds fixture mode, serves :8787, resets local D1, asserts
 ```
 
-`scripts/check-loop.sh` is the real test. It builds nothing and mocks nothing: it walks the
-entire tracking loop through genuine server-action `POST`s — the way a no-JS browser would —
-and asserts each state change, from sign-up through browse, search, watchlist, watched,
-rating, review, per-episode progress, resume, follow, feed and lists. `tsc` and a green
-build prove far less. It resets the local database first, so it is safe to re-run.
+For a manual session against live TMDB, build and serve it yourself, then migrate:
+
+```sh
+pnpm run build
+pnpm exec vite preview --port 8787 &
+bash scripts/init-local-db.sh
+```
+
+`scripts/check-loop.sh` is the real test. It bakes fixture mode into the build (so it never
+touches the network, whatever `.dev.vars` holds), serves the Worker on port 8787, starts
+from a freshly reset local D1, and mocks nothing: it walks the entire app through genuine
+server-action `POST`s — the way a no-JS browser would — and asserts each state change.
+The assertions cover sign-up through browse, search, watchlist, watched, rating,
+review, per-episode progress, resume, follow, feed and lists, then the areas added later:
+
+| Area | Assertions |
+|---|---|
+| Diary | `logWatch` writes a dated row, a second log flags a rewatch, `deleteWatchEntry` removes exactly one row |
+| Likes / favourites | `toggleLiked` shows on the profile; `setFavorite` pins a slot and clears on a second call |
+| Lists | `renameList` updates name + description; `moveListItem` reorders in one swap |
+| Avatars | Upload round-trips through R2 and `/api/avatar/{id}` (skipped when no bucket) |
+| Browsing | `?kind=` filters and the rating sort narrow the grids |
+| Feed API | `/api/feed` pages exactly like the server feed and 401s signed-out callers |
+
+`tsc` and a green build prove far less. It resets the local database first, so it is safe
+to re-run; it needs port 8787 free and kills its own server via `trap`.
 
 Supporting scripts:
 
@@ -226,6 +269,18 @@ otherwise, and `BETTER_AUTH_URL` must match that origin.
 
 **Local D1 does not persist across server restarts.**
 
+**D1 statement limits force chunking.** Local D1 (miniflare) rejects a compound SELECT with
+more than 5 terms, and D1 caps a statement at 100 bound parameters. Every lookup that takes
+a list of titles goes through `chunkRefs`/`refFilter` with `REF_CHUNK = 60`
+(`lib/library/queries.ts`). `db.transaction` is unusable for the same class of reason: it
+emits `begin`/`commit`, which D1 rejects, so atomic multi-writes use `db.batch`.
+
+**Tailwind v4 disables `hover:` on touch devices.** `hover:` and `group-hover:` compile
+behind `@media (hover: hover)`, so a hover-only reveal is invisible on a phone. Anything
+that must be reachable without a pointer carries `pointer-coarse:opacity-100` — the card
+quick actions do — and hit targets are widened with `.touch-hit` / `.touch-hit-y`
+(`app/globals.css`).
+
 ## Architecture notes
 
 **The source adapter seam.** Every playable stream resolves through one interface, and
@@ -249,7 +304,49 @@ choice with `?source=`.
 
 **Series progress is derived, never stored.** One row per watched episode; season and show
 progress are computed at query time. A stored counter is a bug waiting for a delete. Bulk
-actions (*mark season*, *mark show*) are a single batched transaction.
+actions (*mark season*, *mark show*) are a single `db.batch`.
+
+**Rating chips are cached in two layers.** TMDB's `external_ids` gives a title's IMDb id
+(KV `omdb:ids:{kind}:{tmdbId}`, 30 days); OMDb gives the scores (KV `omdb:scores:{imdbId}`,
+7 days, and a `Response: "False"` miss retries after an hour). Both upstreams are rate
+limited per isolate (20/s) and every failure — no key, no id, timeout, junk payload —
+resolves to `{ imdb: null, rt: null }`, which renders the TMDB score chip instead. So the
+badges degrade instead of breaking, and steady-state OMDb traffic is near zero. Signed-out
+grids skip the whole batch (`user ? … : new Map()` in `app/page.tsx`) to bound fan-out;
+detail pages always show real ratings.
+
+**The library is rows, not counters.** A `watch_entry` row is one watch — its own date,
+rewatch flag and optional episode — so the diary is a view over the same table the watched
+grid reads. Ratings and reviews are title-level (one per user + title); a diary entry never
+carries its own score. Likes live in `media_like` (`like` is a SQL keyword); favourites are
+four `favorite` rows, one slot each, reassigned deterministically in one `db.batch`. Every
+user-owned row carries `user_id`, avatars included (`avatars/{userId}` in R2, served by
+`/api/avatar/{userId}` with a `?v=` cache-buster).
+
+**Controls work with JavaScript disabled.** Toggles are client components that submit
+through their own `<form action={action} method="post">`, so the plain-HTML POST path stays
+intact and the button updates optimistically when JS is present — see
+`components/library/watch-toggle.tsx` for the pattern. Server actions revalidate through
+`pathsForMedia(userId, kind, tmdbId)` in `lib/library/actions.ts`, the single place that
+names every path a library change affects.
+
+**Pages and endpoints.**
+
+| Path | What it is |
+|---|---|
+| `/` | Trending films + series; recently watched when signed in |
+| `/search` | Full-text search — `/api/search` backs the debounced suggestions |
+| `/watched`, `/watchlist` | Kept grids with `?kind=` and, on watched, `?sort=rating` |
+| `/diary` | One row per watch, `?year=` / `?month=` filters, log + delete |
+| `/feed` | Activity feed; `/api/feed?before=` appends older pages |
+| `/lists`, `/lists/[id]` | User lists, rename + per-item reordering for the owner |
+| `/movie/[id]`, `/tv/[id]`, `/tv/[id]/season/[n]` | Detail pages, cast/crew, per-episode progress |
+| `/watch/[kind]/[id]` | Player shell; `?source=` overrides the remembered source |
+| `/u/[id]`, `/u/[id]/reviews` | Profile (avatar, bio, stats, favourites, likes, diary) and all reviews |
+| `/people` | Everyone on the instance, with follow buttons |
+| `/settings` | Name, bio, avatar upload/removal (self only) |
+| `/sign-in`, `/sign-up` | Email + password auth |
+| `/api/health`, `/api/avatar/{userId}` | Liveness; avatar bytes out of R2 |
 
 **Read bindings from `cloudflare:workers`, not `process.env`.** In the route-handler bundle
 `process.env` carries declared bindings, but in the React Server Component render path it
@@ -261,7 +358,11 @@ surfaces far from the cause as a `TypeError: Cannot read properties of undefined
 
 Deliberately **out of scope**: hosting, proxying or re-encoding video bytes; internationalisation;
 anime-specific handling and ID spaces; native mobile or PWA push notifications; comments,
-direct messages, likes or chat; external subtitle tracks.
+direct messages and chat; external subtitle tracks.
+
+Liking a *title* and favouriting it are implemented (that is library data, per user).
+What stays out is anything social between users: comments, replies, direct messages, chat,
+and likes on other people's activity.
 
 The app stores no media and proxies no video bytes — it points at streams. The default
 stream sources are unlicensed aggregators, and a takedown response path is required before
