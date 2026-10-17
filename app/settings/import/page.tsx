@@ -122,6 +122,11 @@ export default async function ImportPage({
                 columns plus Rating.
               </li>
               <li>
+                Letterboxd’s <code>watchlist.csv</code> — the same columns again,
+                so the filename is what tells it from <code>watched.csv</code> —
+                fills your watchlist and logs no watch.
+              </li>
+              <li>
                 IMDb’s ratings export — Const, Title, Your Rating, Date Rated.
               </li>
               <li>

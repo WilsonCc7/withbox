@@ -11,8 +11,8 @@ export async function SiteHeader({ defaultQuery = "" }: { defaultQuery?: string 
     <>
       <header className="sticky top-0 z-10 border-b border-border bg-bg/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-3 sm:px-6">
-          <a className="shrink-0 font-display text-lg font-bold text-fg" href="/">
-            Withbox
+          <a className="shrink-0" href="/">
+            <img alt="Withbox" className="h-7 w-auto" height="32" src="/logo-mark.svg" width="64" />
           </a>
 
           {/* Hidden below `sm`: at 390px this row was squeezed to 154px and

@@ -11,7 +11,11 @@
  * Letterboxd stars are 0.5–5 (doubled), IMDb is already 1–10.
  */
 
-export type ExportKind = "letterboxd-watched" | "letterboxd-ratings" | "imdb-ratings";
+export type ExportKind =
+  | "letterboxd-watched"
+  | "letterboxd-ratings"
+  | "letterboxd-watchlist"
+  | "imdb-ratings";
 
 export interface WatchIntent {
   title: string;
@@ -21,7 +25,10 @@ export interface WatchIntent {
   rating: number | null;
 }
 
-/** Letterboxd's two exports share this header; the ratings one adds `Rating`. */
+/**
+ * Letterboxd's exports share this header; `ratings.csv` adds `Rating`, and
+ * `watched.csv` / `watchlist.csv` are byte-identical, filename aside.
+ */
 const LETTERBOXD_COLUMNS = ["date", "name", "year", "letterboxd uri"];
 const IMDB_COLUMNS = ["const", "title", "your rating", "date rated"];
 
@@ -31,14 +38,28 @@ const IMDB_COLUMNS = ["const", "title", "your rating", "date rated"];
  * Matched on names only, case-insensitively and tolerant of surrounding
  * spaces, so an extra column (Letterboxd's `Rating`, IMDb's `Original Title`)
  * does not defeat detection.
+ *
+ * `watched.csv` and `watchlist.csv` carry the same header byte for byte, so
+ * `fileName`, when given, is what tells them apart; a `Rating` column means
+ * the ratings export whatever the file is called.
  */
-export function detectExport(header: string[]): ExportKind | null {
+export function detectExport(
+  header: string[],
+  fileName?: string,
+): ExportKind | null {
   const names = header.map((name) => name.trim().toLowerCase());
   const hasAll = (expected: string[]) => expected.every((name) => names.includes(name));
 
   // Ratings first: its header is the watched header plus one column.
   if (hasAll(LETTERBOXD_COLUMNS)) {
-    return names.includes("rating") ? "letterboxd-ratings" : "letterboxd-watched";
+    if (names.includes("rating")) return "letterboxd-ratings";
+    // `watched.csv` and `watchlist.csv` are byte-identical apart from the name.
+    // The last path segment decides, lowercased: a file can arrive as
+    // `C:\Users\…\watchlist.csv`.
+    const segment = (fileName ?? "").split(/[\\/]/).pop() ?? "";
+    return segment.toLowerCase().includes("watchlist")
+      ? "letterboxd-watchlist"
+      : "letterboxd-watched";
   }
   if (hasAll(IMDB_COLUMNS)) return "imdb-ratings";
   return null;

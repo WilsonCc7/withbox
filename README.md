@@ -19,9 +19,11 @@ Deployed to Cloudflare Workers on your own domain.
   the same 30-second floor and near-end rule the player applies.
 - **Stats** — `/stats`: counts, a per-year bar row, longest streak, top rated and genres,
   every figure derived from rows at query time. `?year=2020` is the year in review.
-- **Import** — `/settings/import` takes Letterboxd's `watched.csv` / `ratings.csv` or
-  IMDb's ratings CSV. Matching is exact on title and year (a wrong import is worse than a
-  missed one), a re-run adds nothing, and unmatched rows are reported.
+- **Import** — `/settings/import` takes Letterboxd's `watched.csv` / `watchlist.csv` /
+  `ratings.csv` or IMDb's ratings CSV. `watched.csv` and `watchlist.csv` are the same
+  columns, so the filename decides which one it is. Matching is exact on title and year (a
+  wrong import is worse than a missed one), a re-run adds nothing, and unmatched rows are
+  reported.
 - **Command palette** — `⌘K` / `Ctrl-K`, or `/` when focus is not in a field: jump to any
   page or to a title, with the same search endpoint the header box uses.
 - **Account menu** — the header avatar opens Profile, Diary, Watchlist, Lists, Stats,

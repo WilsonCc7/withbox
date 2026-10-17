@@ -113,11 +113,11 @@ echo "ok  search: no query, no matches, and a hit all render"
 # The redirect itself is client-side, but the shell and the cross-link must be
 # in the server-rendered HTML, or a no-JS visitor is stranded.
 curl -s -m 15 "$BASE/sign-in?next=/watched" -o /tmp/si.html
-body /tmp/si.html | grep -q "Withbox" || fail "sign-in page renders no site header"
+grep -qE '<img [^>]*alt="Withbox"' /tmp/si.html || fail "sign-in page renders no site header"
 grep -qE 'sign-up\?next=(%2F|/)watched' /tmp/si.html \
   || fail "sign-in does not carry ?next= through to sign-up"
 curl -s -m 15 "$BASE/sign-up" -o /tmp/su.html
-body /tmp/su.html | grep -q "Withbox" || fail "sign-up page renders no site header"
+grep -qE '<img [^>]*alt="Withbox"' /tmp/su.html || fail "sign-up page renders no site header"
 echo "ok  auth pages render the header and carry ?next="
 
 # --- signed in -----------------------------------------------------------
@@ -895,6 +895,15 @@ else
   echo "ok  avatar uploads to R2 and round-trips through /api/avatar"
 fi
 
+# --- static brand assets -------------------------------------------------
+# The header mark and the favicon are the same file, and a 404 there breaks
+# the header image on every page — something no page-text assertion catches.
+CODE=$(curl -s -m 15 "$BASE/logo-mark.svg" -D /tmp/logo-head.txt -o /tmp/logo-out.svg -w '%{http_code}')
+[[ "$CODE" == "200" ]] || fail "/logo-mark.svg returned $CODE"
+grep -qi '^content-type: image/svg+xml' /tmp/logo-head.txt \
+  || fail "/logo-mark.svg served the wrong content type"
+echo "ok  /logo-mark.svg serves as an SVG asset"
+
 # --- library filters and sort --------------------------------------------
 CODE=$(curl -s -m 15 "$BASE/watched?kind=movie&sort=rating" -b "$JAR" -o /tmp/w-movie.html -w '%{http_code}')
 [[ "$CODE" == "200" ]] || fail "/watched?kind=movie&sort=rating returned $CODE"
@@ -1100,6 +1109,78 @@ STATUS=$(curl -s -m 60 -X POST "$BASE/settings/import" -b "$JAR" -c "$JAR" \
 curl -s -m 15 "$BASE/diary" -b "$JAR" -o /tmp/diary-rerun.html
 RERUN=$(count_rows /tmp/diary-rerun.html)
 [[ "$RERUN" == "$AFTER" ]] || fail "a second identical import added $((RERUN - AFTER)) rows"
+
+# --- watchlist.csv is a different export behind the same header ----------
+# `watched.csv` and `watchlist.csv` are byte-identical apart from the name, so
+# a filename-blind importer logged a diary row here and put nothing on the
+# watchlist. The row's date is a fresh one: that is what the watched2.csv copy
+# below needs to prove the other direction of the split.
+grid_total() { # file label — the grid heading states its own size, `Watched (3)`
+  body "$1" | grep -oE "$2 [(][0-9]+[)]" | grep -oE '[0-9]+' | head -1 || true
+}
+
+printf 'Date,Name,Year,Letterboxd URI\n2021-05-06,Inception,2010,https://boxd.it/z\n' > /tmp/watchlist.csv
+curl -s -m 15 "$BASE/watchlist" -b "$JAR" -o /tmp/wl-before-imp.html
+WL_BEFORE=$(grid_total /tmp/wl-before-imp.html Watchlist)
+[[ -n "$WL_BEFORE" ]] || fail "/watchlist does not state its own size"
+curl -s -m 15 "$BASE/diary" -b "$JAR" -o /tmp/diary-wl-before.html
+WL_DIARY=$(count_rows /tmp/diary-wl-before.html)
+curl -s -m 15 "$BASE/watched" -b "$JAR" -o /tmp/watched-wl-before.html
+WATCHED_BEFORE=$(grid_total /tmp/watched-wl-before.html Watched)
+[[ -n "$WATCHED_BEFORE" ]] || fail "/watched does not state its own size"
+
+STATUS=$(curl -s -m 60 -X POST "$BASE/settings/import" -b "$JAR" -c "$JAR" \
+  -H "Origin: $BASE" -F "$IMP=" -F "file=@/tmp/watchlist.csv;type=text/csv" \
+  -D /tmp/imp-wl1-head.txt -o /dev/null -w '%{http_code}')
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "the watchlist import returned $STATUS"
+grep -q 'done=1' /tmp/imp-wl1-head.txt \
+  || fail "the watchlist import does not report one inserted entry"
+
+curl -s -m 15 "$BASE/watchlist" -b "$JAR" -o /tmp/wl-after-imp.html
+WL_AFTER=$(grid_total /tmp/wl-after-imp.html Watchlist)
+[[ "$WL_AFTER" == "$((WL_BEFORE + 1))" ]] \
+  || fail "importing one watchlist row moved /watchlist by $((WL_AFTER - WL_BEFORE)), expected 1"
+body /tmp/wl-after-imp.html | grep -q "Inception" \
+  || fail "the imported title is not on /watchlist"
+# An intent to watch is not a watch: neither grid may move.
+curl -s -m 15 "$BASE/diary" -b "$JAR" -o /tmp/diary-wl-after.html
+DIARY_END=$(count_rows /tmp/diary-wl-after.html)
+[[ "$DIARY_END" == "$WL_DIARY" ]] \
+  || fail "a watchlist import added $((DIARY_END - WL_DIARY)) diary rows"
+curl -s -m 15 "$BASE/watched" -b "$JAR" -o /tmp/watched-wl-after.html
+WATCHED_AFTER=$(grid_total /tmp/watched-wl-after.html Watched)
+[[ "$WATCHED_AFTER" == "$WATCHED_BEFORE" ]] \
+  || fail "a watchlist import moved /watched by $((WATCHED_AFTER - WATCHED_BEFORE))"
+
+# The unique index on (userId, kind, tmdbId) ignores a conflict silently, so
+# the action reports the re-run as skipped rather than duplicating the entry.
+STATUS=$(curl -s -m 60 -X POST "$BASE/settings/import" -b "$JAR" -c "$JAR" \
+  -H "Origin: $BASE" -F "$IMP=" -F "file=@/tmp/watchlist.csv;type=text/csv" \
+  -D /tmp/imp-wl-head.txt -o /dev/null -w '%{http_code}')
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "the second watchlist import returned $STATUS"
+grep -q 'done=0' /tmp/imp-wl-head.txt \
+  || fail "a re-run of watchlist.csv does not report zero inserted"
+grep -q 'skipped=1' /tmp/imp-wl-head.txt \
+  || fail "a re-run of watchlist.csv does not report the entry as skipped"
+curl -s -m 15 "$BASE/watchlist" -b "$JAR" -o /tmp/wl-rerun.html
+[[ "$(grid_total /tmp/wl-rerun.html Watchlist)" == "$WL_AFTER" ]] \
+  || fail "a second identical watchlist import changed /watchlist"
+
+# Same bytes, a filename without `watchlist`: the diary path, and the same
+# header must not be read as the watchlist export again.
+cp /tmp/watchlist.csv /tmp/watched2.csv
+STATUS=$(curl -s -m 60 -X POST "$BASE/settings/import" -b "$JAR" -c "$JAR" \
+  -H "Origin: $BASE" -F "$IMP=" -F "file=@/tmp/watched2.csv;type=text/csv" \
+  -o /dev/null -w '%{http_code}')
+[[ "$STATUS" == "200" || "$STATUS" == "303" ]] || fail "the watched2.csv import returned $STATUS"
+curl -s -m 15 "$BASE/diary" -b "$JAR" -o /tmp/diary-w2.html
+W2=$(count_rows /tmp/diary-w2.html)
+[[ "$W2" == "$((WL_DIARY + 1))" ]] \
+  || fail "the same bytes under watched2.csv added $((W2 - WL_DIARY)) diary rows, expected 1"
+curl -s -m 15 "$BASE/watchlist" -b "$JAR" -o /tmp/wl-w2.html
+[[ "$(grid_total /tmp/wl-w2.html Watchlist)" == "$WL_AFTER" ]] \
+  || fail "the watched2.csv import changed /watchlist"
+echo "ok  watchlist.csv fills the watchlist only, and the filename picks the export"
 
 # A title the catalogue does not have is REPORTED, never invented. The action
 # redirects with its counts, and React carries that on the action response.

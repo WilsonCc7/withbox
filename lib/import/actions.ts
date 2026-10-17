@@ -4,9 +4,9 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { rating, watchEntry } from "@/db/schema";
+import { rating, watchEntry, watchlistItem } from "@/db/schema";
 import { getDb } from "@/lib/db";
-import { chunkRefs } from "@/lib/library/queries";
+import { chunkRefs, getWatchlistKeys } from "@/lib/library/queries";
 import { mediaKey, type MediaRef } from "@/lib/library/types";
 import type { MediaKind } from "@/lib/media/types";
 import { mediaSource } from "@/lib/media/runtime";
@@ -198,7 +198,9 @@ export async function importLibrary(formData: FormData): Promise<void> {
 
   // `detectExport` reads column names off the first row; an empty file has
   // none, which is the same failure as a header that matches neither export.
-  const kind = rows.length === 0 ? null : detectExport(rows[0]);
+  // The filename is passed because `watched.csv` and `watchlist.csv` are the
+  // same header byte for byte.
+  const kind = rows.length === 0 ? null : detectExport(rows[0], file.name);
   if (kind === null) {
     redirect("/settings/import?error=format");
   }
@@ -232,6 +234,62 @@ export async function importLibrary(formData: FormData): Promise<void> {
     });
   }
 
+  const db = getDb();
+
+  // A watchlist export is the same header as `watched.csv`, so `detectExport`
+  // already said which one this is. A watchlist entry is an intent to watch:
+  // this path writes no `watch_entry` row and no score.
+  if (kind === "letterboxd-watchlist") {
+    // Insert-if-absent against the unique index, like `toggleWatchlist`: the
+    // pre-check makes a re-run report `skipped` instead of quietly conflicting.
+    const existing = await getWatchlistKeys(user.id, resolved.map((row) => row.ref));
+    const inserts: BatchItem<"sqlite">[] = [];
+    const added: MediaRef[] = [];
+
+    for (const row of resolved) {
+      const key = mediaKey(row.ref);
+      if (existing.has(key)) {
+        skipped++;
+        continue;
+      }
+      // Two rows for one title inside one file are one entry.
+      existing.add(key);
+      added.push(row.ref);
+      inserts.push(
+        db
+          .insert(watchlistItem)
+          .values({
+            id: crypto.randomUUID(),
+            userId: user.id,
+            kind: row.ref.kind,
+            tmdbId: row.ref.tmdbId,
+            // The row's own `Date`, or `now` when the export had none.
+            addedAt: row.watchedAt,
+          })
+          .onConflictDoNothing(),
+      );
+    }
+
+    if (inserts.length > 0) {
+      const [first, ...rest] = inserts;
+      await db.batch([first, ...rest]);
+    }
+
+    const paths = new Set<string>(["/", "/watchlist", `/u/${user.id}`]);
+    for (const ref of added) {
+      for (const path of pathsForMedia(user.id, ref.kind, ref.tmdbId)) {
+        paths.add(path);
+      }
+    }
+    for (const path of paths) {
+      revalidatePath(path);
+    }
+
+    redirect(
+      `/settings/import?done=${added.length}&skipped=${skipped}&missing=${missing}`,
+    );
+  }
+
   // `watch_entry` has no unique index — a repeated row is a legitimate rewatch
   // — so this check, not a constraint, is what makes re-running the same file
   // add nothing.
@@ -261,7 +319,6 @@ export async function importLibrary(formData: FormData): Promise<void> {
     [...scores.values()].map((score) => score.ref),
   );
 
-  const db = getDb();
   const now = new Date();
   const statements: BatchItem<"sqlite">[] = [];
 

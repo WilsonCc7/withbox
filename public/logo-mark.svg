@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="90 120 320 160" role="img" aria-label="withbox logo">
+  <!-- three overlapping circles, mixed accents -->
+  <g opacity="0.92">
+    <circle cx="170" cy="200" r="64" fill="#00e054"/>
+    <circle cx="250" cy="200" r="64" fill="#ffb020"/>
+    <circle cx="330" cy="200" r="64" fill="#4aa8ff"/>
+  </g>
+  <!-- mini character 1: looks left -->
+  <g>
+    <circle cx="170" cy="200" r="27" fill="#f4fcf6"/>
+    <circle cx="154" cy="196" r="8" fill="#14181c"/>
+    <circle cx="176" cy="196" r="8" fill="#14181c"/>
+    <circle cx="151.5" cy="193.5" r="2.6" fill="#ffffff"/>
+    <circle cx="173.5" cy="193.5" r="2.6" fill="#ffffff"/>
+    <path d="M162 210 Q170 215 178 210" stroke="#14181c" stroke-width="3" stroke-linecap="round" fill="none"/>
+  </g>
+  <!-- mini character 2: looks up -->
+  <g>
+    <circle cx="250" cy="200" r="27" fill="#f4fcf6"/>
+    <circle cx="239" cy="190" r="8" fill="#14181c"/>
+    <circle cx="261" cy="190" r="8" fill="#14181c"/>
+    <circle cx="239" cy="187.5" r="2.6" fill="#ffffff"/>
+    <circle cx="261" cy="187.5" r="2.6" fill="#ffffff"/>
+    <path d="M242 210 Q250 215 258 210" stroke="#14181c" stroke-width="3" stroke-linecap="round" fill="none"/>
+  </g>
+  <!-- mini character 3: looks right -->
+  <g>
+    <circle cx="330" cy="200" r="27" fill="#f4fcf6"/>
+    <circle cx="324" cy="196" r="8" fill="#14181c"/>
+    <circle cx="346" cy="196" r="8" fill="#14181c"/>
+    <circle cx="326.5" cy="193.5" r="2.6" fill="#ffffff"/>
+    <circle cx="348.5" cy="193.5" r="2.6" fill="#ffffff"/>
+    <path d="M322 210 Q330 215 338 210" stroke="#14181c" stroke-width="3" stroke-linecap="round" fill="none"/>
+  </g>
+</svg>
