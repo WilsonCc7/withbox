@@ -16,6 +16,8 @@ export default defineConfig({
     assets: { notFoundHandling: "none", runWorkerFirst: ["/_vinext/static-cache/*"] },
     env: {
       ASSETS: bindings.assets(),
+      // Local dev and preview emulate KV, so this id works there; a deployment
+      // under another account must swap in its own namespace id (see README).
       VINEXT_KV_CACHE: bindings.kv({
         id: "0a4596c051b347c1b83569c74ff25372",
       }),

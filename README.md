@@ -201,15 +201,30 @@ in `cloudflare.config.ts` (`triggers.fetch`) behind a proxied CNAME to the worke
 subdomain; `workersDev: false` keeps the workers.dev hostname from becoming a second origin,
 which Better Auth rejects (`BETTER_AUTH_URL` must equal the origin the browser actually uses).
 
-**1. Create the database.** D1 database `withbox`, bound by ID:
+**1. Create the database and the cache.** D1 database `withbox`, bound by ID:
 
 ```sh
-pnpm exec cf d1 create withbox
+pnpm exec cf d1 create --name withbox
 ```
 
 ```ts
 DB: bindings.d1({ name: "withbox", id: "your-database-uuid" }),
 ```
+
+Then the KV namespace the TMDB and OMDb caches live in. `cloudflare.config.ts` ships the
+author's namespace id, and a namespace id resolves only inside the account that owns it, so
+replace it with one of your own before deploying:
+
+```sh
+pnpm exec cf kv namespaces create --title withbox-cache
+```
+
+```ts
+VINEXT_KV_CACHE: bindings.kv({ id: "your-kv-namespace-id" }),
+```
+
+Local dev and `vite preview` emulate KV, so the author's id works there — only a real
+deployment needs your own. R2 is the same shape and gets its own step below.
 
 **2. Supply the secrets on the *first* deploy.** `TMDB_API_KEY`, `BETTER_AUTH_SECRET` and
 `OMDB_API_KEY` are `bindings.secret()` and are not read from `.dev.vars` in production. A
@@ -235,7 +250,7 @@ renders.
 **3. Avatars.** R2 must be enabled on the account first, then:
 
 ```sh
-pnpm exec cf r2 buckets create withbox-avatars
+pnpm exec cf r2 buckets create --name withbox-avatars
 ```
 
 The `AVATARS` binding is optional too: with no bucket, uploads return silently and profiles
