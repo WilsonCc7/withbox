@@ -1,13 +1,12 @@
 # Withbox
 
-**Letterboxd, if Letterboxd also did TV and let you hit play.**
+**Letterboxd, if Letterboxd also did TV Series and let you hit play.**
 
 Track films *and* series: log every watch, rate it, review it, keep a watchlist, follow
 people, and start the episode without leaving the app. Every control also works with
 JavaScript switched off — which is a lovelier sentence to write than it is to implement.
 
-This README covers what's in the box, how to get your own copy running, and the handful of
-traps that will otherwise eat your afternoon.
+You can import your Letterboxd library yourself.
 
 ## What's in the box
 
