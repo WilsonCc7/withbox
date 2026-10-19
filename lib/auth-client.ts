@@ -5,7 +5,7 @@ import { createAuthClient } from "better-auth/react";
  *
  * Sign-in and sign-up post to `/api/auth/[...all]`, which works in the
  * production build. `vite dev` cannot serve those routes in this project (see
- * the limitations section in `.omp/AGENTS.md`), so test auth with
+ * *Known limitations* in `README.md`), so test auth with
  * `pnpm run build && pnpm run start`.
  */
 export const authClient = createAuthClient();
