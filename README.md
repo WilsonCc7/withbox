@@ -195,10 +195,11 @@ ids from the sign-up response, never from a listing page's first link.
 ## Deploying
 
 Deployed as Worker `withbox` on **https://withbox.wilsb.me**, and only there. That hostname
-is a Workers route declared in `cloudflare.config.ts` (`triggers.fetch`) behind a proxied
-CNAME to the workers.dev subdomain; `workersDev: false` keeps the workers.dev hostname from
-becoming a second origin, which Better Auth rejects (`BETTER_AUTH_URL` must equal the origin
-the browser actually uses).
+is the author's own deployment; every `withbox.wilsb.me` below is an example — substitute
+your own host in `WITHBOX_BASE_URL` and the route. The hostname is a Workers route declared
+in `cloudflare.config.ts` (`triggers.fetch`) behind a proxied CNAME to the workers.dev
+subdomain; `workersDev: false` keeps the workers.dev hostname from becoming a second origin,
+which Better Auth rejects (`BETTER_AUTH_URL` must equal the origin the browser actually uses).
 
 **1. Create the database.** D1 database `withbox`, bound by ID:
 

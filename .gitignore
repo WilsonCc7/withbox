@@ -15,3 +15,10 @@ tmdbapikey.md
 
 # Local design-tooling state (critique snapshots, overlay server).
 .impeccable/
+
+# Agent context and agent tooling — local to a working copy, never published.
+.omp/
+.agents/
+.claude/
+skills-lock.json
+autoresearch.sh
