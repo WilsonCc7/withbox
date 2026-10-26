@@ -942,6 +942,11 @@ db_scalar "DELETE FROM playback_progress WHERE kind='movie' AND tmdbId=550 RETUR
 curl -s -m 15 "$BASE/watch/movie/550" -b "$JAR" -o /tmp/fresh-film.html
 FF=$(iframe_src /tmp/fresh-film.html)
 [[ "$FF" == *framextv* ]] || fail "a fresh film did not default to framextv (got $FF)"
+# The provider's `.xyz` host 301s to `.cc`. A redirecting frame loses every
+# permission the parent `allow` attribute delegates, so the embed's own
+# fullscreen button dies with "Disallowed by permissions policy". The adapter
+# must therefore point at the redirect-free host.
+[[ "$FF" == *framextv.cc* ]] || fail "the framextv embed went through a redirect (got $FF)"
 echo "ok  a saved position prefers a resumable source, a fresh film keeps the default"
 
 # Leave the film mid-watch for the continue-watching check below.

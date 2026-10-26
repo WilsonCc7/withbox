@@ -1,17 +1,25 @@
 /**
  * framextv adapter.
  *
- * Constructs `https://framextv.xyz/embed/{tmdbId}?autoplay=1&muted=0`
+ * Constructs `https://framextv.cc/embed/{tmdbId}?autoplay=1&muted=0`
  * for movies. The provider is undocumented: its TV season/episode
  * parameter shape is UNVERIFIED, so rather than guess a URL shape we
  * return `null` for the TV case and let the registry fall through to an
  * adapter that supports episodes.
  *
  * Resume is NOT supported here: the provider has no API surface at all.
+ *
+ * The `.cc` host is deliberate and not interchangeable with `.xyz`: `.xyz`
+ * answers with a 301 to `.cc`, and a redirecting frame loses the permissions
+ * the parent `allow` attribute delegates — the browser pins a bare token to
+ * the frame's pre-redirect origin. Reproduced: the embed's own fullscreen
+ * button throws `Disallowed by permissions policy` from a redirecting frame
+ * and works from a direct one. `autoplay` and `picture-in-picture` are dropped
+ * the same way.
  */
 import type { Resolution, SourceAdapter } from "./types";
 
-const BASE_URL = "https://framextv.xyz/embed";
+const BASE_URL = "https://framextv.cc/embed";
 
 export function createFramextvAdapter(): SourceAdapter {
   return {
