@@ -89,6 +89,8 @@ export function createLiveSource(
   }
 
   return {
+    offline: false,
+
     async trending(
       kind: MediaKind | "all",
       window: TrendingWindow = "day",

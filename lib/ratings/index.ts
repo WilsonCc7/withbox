@@ -12,6 +12,11 @@
  * Every failure — missing key, no IMDb id, network error, timeout — degrades
  * to `{ imdb: null, rt: null }` so callers fall back to the TMDB score.
  * Nothing from this module throws.
+ *
+ * An offline media source (`source.offline`) short-circuits to `NONE` before
+ * any cache read: this module is the one place that reaches an upstream using
+ * an id obtained from another one, so it is the one place a cached id could
+ * turn an offline build into a networked one.
  */
 import { env } from "@/lib/env";
 import { mediaKey } from "@/lib/library/types";
@@ -46,6 +51,14 @@ export async function getRatings(
  source: MediaSource,
  ref: { kind: MediaKind; tmdbId: number },
 ): Promise<MediaRatings> {
+ // An offline source has no upstream ids, and it must not reach one through the
+ // cache either: `omdb:ids:*` entries outlive a build (30d) and are shared with
+ // live runs, so a title cached during a live session used to hand this module
+ // an IMDb id and turn a fixture build into a networked one. The visible
+ // symptom was a page that rendered IMDb chips on one load and the TMDB chip on
+ // the next, because a failed OMDb call is never cached.
+ if (source.offline) return NONE;
+
  const { OMDB_API_KEY: apiKey, VINEXT_KV_CACHE: kv } = env();
  if (!apiKey || !kv) return NONE;
 

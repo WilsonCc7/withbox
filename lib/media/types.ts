@@ -109,6 +109,14 @@ export type SearchScope = MediaKind | "multi";
  * throwing, and must not leak transport errors to callers.
  */
 export interface MediaSource {
+  /**
+   * True when this source makes no upstream calls at all (the fixture
+   * transport). Callers that reach a *different* upstream through a cached id
+   * — the OMDb ratings resolver reads `externalIds` — must check it: a cached
+   * id would otherwise turn an offline build into a networked one.
+   */
+  readonly offline: boolean;
+
   trending(
     kind: MediaKind | "all",
     window?: TrendingWindow,

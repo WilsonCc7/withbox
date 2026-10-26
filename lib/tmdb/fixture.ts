@@ -52,6 +52,8 @@ function seasonKey(tvId: number, seasonNumber: number): string {
 
 export function createFixtureSource(): MediaSource {
   return {
+    offline: true,
+
     async trending(
       kind: MediaKind | "all",
       _window: TrendingWindow = "day",
